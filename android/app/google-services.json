@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "526185856516",
+    "project_id": "mealmommyapplication",
+    "storage_bucket": "mealmommyapplication.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:526185856516:android:6339f3fe8f229dd50cbf51",
+        "android_client_info": {
+          "package_name": "com.example.mealmommy_application"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCiUjGqos6dxDMxeaUAePje47u9n0-8jFI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
