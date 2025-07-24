@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../models/user_model.dart';
 import '../customer/customer_home.dart';
-import '../vendor/vendor_home.dart';
+import '../vendor/homepage.dart';
 import '../driver/driver_home.dart';
 import '../main.dart';
 
@@ -36,7 +36,7 @@ class AuthWrapper extends StatelessWidget {
               return const CustomerHome();
             case 'vendor':
               print('AuthWrapper: Routing to VendorHome');
-              return const VendorHome();
+              return const HomePage();
             case 'driver':
               print('AuthWrapper: Routing to DriverHome');
               return const DriverHome();

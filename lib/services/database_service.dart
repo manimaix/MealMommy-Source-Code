@@ -22,4 +22,20 @@ class FirebaseService {
   Future<DocumentReference> addDocument(String collectionName, Map<String, dynamic> data) async {
     return await FirebaseFirestore.instance.collection(collectionName).add(data);
   }
+
+  Future<List<Map<String, dynamic>>> fetchUserNotifications({
+  required String receiverId,
+  int limit = 2,
+  }) async {
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('notification')
+        .where('receiver_id', isEqualTo: receiverId)
+        .orderBy('sent_at', descending: true)
+        .limit(limit)
+        .get();
+
+    return querySnapshot.docs
+        .map((doc) => {'id': doc.id, ...doc.data()})
+        .toList();
+  }
 }

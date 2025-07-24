@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:mealmommy_application/Vendor/homepage.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
 import 'register_page.dart';
 import 'customer/customer_home.dart';
-import 'vendor/vendor_home.dart';
+import 'vendor/homepage.dart';
 import 'driver/driver_home.dart';
+import 'notification_page.dart';
+import 'vendor/menu.dart';
+import 'vendor/foodlist.dart';
+import 'vendor/review.dart';
+import 'Vendor/addfood.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +26,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'MealMommy',
       theme: ThemeData(
         primarySwatch: Colors.orange,
@@ -32,8 +37,13 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginPage(),
         '/register': (context) => const RegisterPage(),
         '/customer': (context) => const CustomerHome(),
-        '/vendor': (context) => const VendorHome(),
+        '/vendor': (context) => const HomePage(),
         '/driver': (context) => const DriverHome(),
+        '/notification': (context) => const NotificationPage(),
+        '/menu': (context) => const MenuPage(),
+        '/foodList': (context) => const FoodListPage(),
+        '/review': (context) => const ReviewPage(),
+        '/addfood': (context) => const AddFoodPage(),
       },
     );
   }
