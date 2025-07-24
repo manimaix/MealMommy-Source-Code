@@ -6,6 +6,8 @@ import 'register_page.dart';
 import 'customer/customer_home.dart';
 import 'vendor/homepage.dart';
 import 'driver/driver_home.dart';
+import 'driver/task_list_page.dart';
+import 'driver/live_delivery_page.dart';
 import 'notification_page.dart';
 import 'vendor/menu.dart';
 import 'vendor/foodlist.dart';
@@ -39,6 +41,8 @@ class MyApp extends StatelessWidget {
         '/customer': (context) => const CustomerHome(),
         '/vendor': (context) => const HomePage(),
         '/driver': (context) => const DriverHome(),
+        '/driver/tasks': (context) => const TaskListPage(),
+        '/driver/live-delivery': (context) => const LiveDeliveryPage(),
         '/notification': (context) => const NotificationPage(),
         '/menu': (context) => const MenuPage(),
         '/foodList': (context) => const FoodListPage(),

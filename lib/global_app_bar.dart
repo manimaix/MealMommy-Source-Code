@@ -7,6 +7,8 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onSignOut;
   final VoidCallback? onProfile;
   final List<Widget>? actions;
+  final bool? isOnline;
+  final VoidCallback? onToggleOnline;
 
   const GlobalAppBar({
     Key? key,
@@ -14,11 +16,14 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.onSignOut,
     this.onProfile,
     this.actions,
+    this.isOnline,
+    this.onToggleOnline,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return AppBar(
+      automaticallyImplyLeading: false,
       title: Row(
         mainAxisAlignment: MainAxisAlignment.start,
         children: [
@@ -47,6 +52,27 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
             ),
           ),
         ),
+        // Online status button for drivers only
+        if (currentUser?.role == 'driver') ...[
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: InkWell(
+              onTap: onToggleOnline,
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: (isOnline ?? false) ? Colors.green : Colors.red,
+                  border: Border.all(
+                    color: (isOnline ?? false) ? Colors.green.shade700 : Colors.red.shade700,
+                    width: 2,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
         IconButton(
           icon: CircleAvatar(
             backgroundImage: currentUser?.profileImage != null

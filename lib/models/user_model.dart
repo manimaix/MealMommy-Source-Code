@@ -2,7 +2,7 @@ class AppUser {
   final String uid; // Document ID (e.g., U0001)
   final String email;
   final String name;
-  
+
   final String phoneNumber;
   final String address;
   final String? profileImage;
