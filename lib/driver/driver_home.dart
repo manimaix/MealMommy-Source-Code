@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../global_app_bar.dart';
-import '../models/user_model.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/models.dart';
+import '../services/route_service.dart';
+import '../services/order_service.dart';
+import '../services/delivery_route_service.dart';
+import '../services/chat_service.dart';
+import '../chat_page.dart';
+import '../chat_room_list_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'dart:math' as math;
+import 'dart:async';
 
 class DriverHome extends StatefulWidget {
   const DriverHome({super.key});
@@ -19,14 +23,15 @@ class DriverHome extends StatefulWidget {
 
 class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   AppUser? currentUser;
-  List<Map<String, dynamic>> groupOrders = [];
+  DeliveryPreferences? deliveryPreferences;
+  List<GroupOrder> groupOrders = [];
   bool isLoading = false;
   bool isOnline = false; // Online status for driver
   List<LatLng> routePoints = [];
   LatLng? selectedOrderLocation;
   String? selectedOrderId;
   List<LatLng> allDeliveryLocations = []; // For showing all delivery markers
-  List<Map<String, dynamic>> currentGroupDeliveries = []; // Store current group deliveries data
+  List<Order> currentGroupDeliveries = []; // Store current group deliveries data
   final LatLng driverLocation = LatLng(
     3.139,
     101.6869,
@@ -35,6 +40,9 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   // Animation controllers for smooth expansion
   late AnimationController _expansionController;
   late Animation<double> _expansionAnimation;
+  
+  // Stream subscription for real-time updates
+  StreamSubscription<QuerySnapshot>? _ordersSubscription;
 
   @override
   void initState() {
@@ -48,12 +56,12 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       curve: Curves.easeInOut,
     );
     _loadCurrentUser();
-    _loadGroupOrders();
   }
 
   @override
   void dispose() {
     _expansionController.dispose();
+    _ordersSubscription?.cancel();
     super.dispose();
   }
 
@@ -65,6 +73,12 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
         setState(() {
           currentUser = userData;
         });
+        // Load delivery preferences after user is loaded
+        await _loadDeliveryPreferences();
+        // Load group orders after preferences are loaded
+        await _loadGroupOrders();
+        // Set up real-time listener
+        _setupRealTimeListener();
       }
     } catch (e) {
       print('Error loading user data: $e');
@@ -74,7 +88,44 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
         setState(() {
           currentUser = basicUser;
         });
+        await _loadDeliveryPreferences();
+        await _loadGroupOrders();
+        // Set up real-time listener
+        _setupRealTimeListener();
       }
+    }
+  }
+
+  Future<void> _loadDeliveryPreferences() async {
+    if (currentUser == null) return;
+    
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('delivery_preferences')
+          .doc(currentUser!.uid)
+          .get();
+      
+      if (doc.exists && doc.data() != null) {
+        setState(() {
+          deliveryPreferences = DeliveryPreferences.fromFirestore(doc.data()!, doc.id);
+        });
+      } else {
+        // Create default preferences if none exist
+        final defaultPrefs = DeliveryPreferences.createDefault(
+          driverId: currentUser!.uid,
+        );
+        
+        await FirebaseFirestore.instance
+            .collection('delivery_preferences')
+            .doc(currentUser!.uid)
+            .set(defaultPrefs.toMap());
+        
+        setState(() {
+          deliveryPreferences = defaultPrefs;
+        });
+      }
+    } catch (e) {
+      print('Error loading delivery preferences: $e');
     }
   }
 
@@ -86,6 +137,11 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   }
 
   Future<void> _loadGroupOrders() async {
+    // Wait for current user and delivery preferences to be loaded
+    if (currentUser == null || deliveryPreferences == null) {
+      return;
+    }
+    
     setState(() {
       isLoading = true;
     });
@@ -104,357 +160,136 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getAllOrders() async {
-    final querySnapshot =
-        await FirebaseFirestore.instance.collection('grouporders').get();
-
-    return querySnapshot.docs
-        .map((doc) => {'id': doc.id, ...doc.data()})
-        .toList();
+  void _setupRealTimeListener() {
+    if (currentUser == null) return;
+    
+    // Cancel existing subscription if any
+    _ordersSubscription?.cancel();
+    
+    // Listen to grouporders collection for orders assigned to current driver
+    _ordersSubscription = FirebaseFirestore.instance
+        .collection('grouporders')
+        .where('driver_id', isEqualTo: currentUser!.uid)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            // Refresh orders when there are changes to driver's assigned orders
+            _loadGroupOrders();
+            print('Real-time update: Driver orders changed, refreshing list');
+          },
+          onError: (error) {
+            print('Error in real-time listener: $error');
+          },
+        );
+    
+    // Also listen to orders collection for status changes
+    FirebaseFirestore.instance
+        .collection('orders')
+        .where('driver_id', isEqualTo: currentUser!.uid)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            // Check if any order status changed to 'delivered' or 'completed'
+            bool hasDeliveredOrders = false;
+            for (var change in snapshot.docChanges) {
+              if (change.type == DocumentChangeType.modified) {
+                final data = change.doc.data();
+                if (data != null && 
+                    (data['status'] == 'delivered' || data['status'] == 'completed')) {
+                  hasDeliveredOrders = true;
+                  break;
+                }
+              }
+            }
+            
+            if (hasDeliveredOrders) {
+              _loadGroupOrders();
+              print('Real-time update: Order delivery status changed, refreshing list');
+            }
+          },
+          onError: (error) {
+            print('Error in orders real-time listener: $error');
+          },
+        );
   }
 
+  // Public method to manually refresh orders (can be called from other widgets)
+  Future<void> refreshOrders() async {
+    await _loadGroupOrders();
+  }
+
+  Future<List<GroupOrder>> getAllOrders() async {
+    final ordersData = await OrderService.getAllOrders(
+      currentUserId: currentUser?.uid,
+      deliveryPreferences: deliveryPreferences,
+      driverLocation: driverLocation,
+    );
+    
+    return ordersData.map((data) => GroupOrder.fromFirestore(data, data['id'] ?? '')).toList();
+  }
+
+
+
   double calculateDistance(LatLng point1, LatLng point2) {
-    return Geolocator.distanceBetween(
-          point1.latitude,
-          point1.longitude,
-          point2.latitude,
-          point2.longitude,
-        ) /
-        1000; // Convert to kilometers
+    return RouteService.calculateDistance(point1, point2);
   }
 
   Future<void> getRoute(LatLng destination) async {
     try {
-      // Primary method: Use OSRM (Open Source Routing Machine)
-      await _getOSRMRoute(destination);
+      final route = await RouteService.getRoute(driverLocation, destination);
+      setState(() {
+        routePoints = route;
+      });
 
-      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Route loaded using OSRM real road data'),
+          content: Text('Route loaded successfully'),
           duration: Duration(seconds: 2),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       print('Error getting route: $e');
-      // Fallback: Create a realistic route approximation
-      _createRealisticRoute(destination);
-
-      // Show fallback message
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Using fallback route (OSRM unavailable)'),
+          content: Text('Error loading route'),
           duration: Duration(seconds: 2),
-          backgroundColor: Colors.orange,
+          backgroundColor: Colors.red,
         ),
       );
     }
   }
 
-  Future<void> _getOSRMRoute(LatLng destination) async {
-    // List of OSRM servers to try
-    final List<String> osrmServers = [
-      'https://router.project-osrm.org',
-      'https://routing.openstreetmap.de',
-      'https://osrm.map.bf-ds.de',
-    ];
-
-    for (String server in osrmServers) {
-      try {
-        final String url =
-            '$server/route/v1/driving/'
-            '${driverLocation.longitude},${driverLocation.latitude};'
-            '${destination.longitude},${destination.latitude}'
-            '?overview=full&geometries=geojson&steps=true';
-
-        final response = await http
-            .get(
-              Uri.parse(url),
-              headers: {'User-Agent': 'MealMommy/1.0 (Flutter App)'},
-            )
-            .timeout(const Duration(seconds: 10));
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          if (data['routes'] != null && data['routes'].isNotEmpty) {
-            final coordinates =
-                data['routes'][0]['geometry']['coordinates'] as List;
-
-            setState(() {
-              routePoints =
-                  coordinates
-                      .map<LatLng>(
-                        (coord) => LatLng(
-                          coord[1],
-                          coord[0],
-                        ), // OSRM returns [lon, lat]
-                      )
-                      .toList();
-            });
-
-            print('Successfully got route from OSRM server: $server');
-            return;
-          }
-        }
-      } catch (e) {
-        print('Failed to get route from $server: $e');
-        continue; // Try next server
-      }
-    }
-
-    throw Exception('All OSRM servers failed');
-  }
-
-  void _createRealisticRoute(LatLng destination) {
-    // Create a more realistic route by adding waypoints that simulate following roads
-    final List<LatLng> waypoints = [];
-
-    // Start point
-    waypoints.add(driverLocation);
-
-    // Calculate the difference
-    final double latDiff = destination.latitude - driverLocation.latitude;
-    final double lngDiff = destination.longitude - driverLocation.longitude;
-
-    // Create waypoints that simulate following major roads
-    // In Kuala Lumpur, roads often follow a grid-like pattern with some curves
-
-    final int numWaypoints = 8; // More waypoints for smoother route
-
-    for (int i = 1; i < numWaypoints; i++) {
-      final double progress = i / numWaypoints;
-
-      // Add some realistic variations to simulate following roads
-      double latOffset = latDiff * progress;
-      double lngOffset = lngDiff * progress;
-
-      // Add road-like curves and turns
-      if (i == 2) {
-        // First turn - might go slightly north/south first
-        latOffset += latDiff * 0.1;
-      } else if (i == 4) {
-        // Major road junction - slight detour
-        lngOffset += lngDiff * 0.15;
-      } else if (i == 6) {
-        // Another turn to approach destination
-        latOffset -= latDiff * 0.05;
-      }
-
-      // Add small random variations to make it look more natural
-      final double randomLat = (math.Random().nextDouble() - 0.5) * 0.002;
-      final double randomLng = (math.Random().nextDouble() - 0.5) * 0.002;
-
-      waypoints.add(
-        LatLng(
-          driverLocation.latitude + latOffset + randomLat,
-          driverLocation.longitude + lngOffset + randomLng,
-        ),
-      );
-    }
-
-    // End point
-    waypoints.add(destination);
-
-    setState(() {
-      routePoints = waypoints;
-    });
-  }
-
-  Future<List<Map<String, dynamic>>> getOrdersByGroupId(String groupId) async {
-    final querySnapshot =
-        await FirebaseFirestore.instance
-            .collection('orders')
-            .where('group_id', isEqualTo: groupId)
-            .get();
-
-    return querySnapshot.docs
-        .map((doc) => {'id': doc.id, ...doc.data()})
-        .toList();
+  Future<List<Order>> getOrdersByGroupId(String groupId) async {
+    final ordersData = await OrderService.getOrdersByGroupId(groupId);
+    return ordersData.map((data) => Order.fromFirestore(data, data['id'] ?? '')).toList();
   }
 
   Future<List<LatLng>> optimizeDeliveryRoute(List<Map<String, dynamic>> orders) async {
-    if (orders.isEmpty) return [];
-
-    // First, get vendor location from the first order's vendor_id
-    LatLng? vendorLocation;
-    if (orders.isNotEmpty && orders[0]['vendor_id'] != null) {
-      vendorLocation = await getVendorLocation(orders[0]['vendor_id']);
-    }
-
-    // Convert orders to LatLng points with distances from vendor (or driver if vendor not found)
-    LatLng startPoint = vendorLocation ?? driverLocation;
-    List<Map<String, dynamic>> orderPoints =
-        orders.map((order) {
-          final double lat =
-              double.tryParse(order['delivery_latitude'].toString()) ?? 0.0;
-          final double lng =
-              double.tryParse(order['delivery_longitude'].toString()) ?? 0.0;
-          final LatLng point = LatLng(lat, lng);
-          final double distance = calculateDistance(startPoint, point);
-
-          return {'order': order, 'point': point, 'distance': distance};
-        }).toList();
-
-    // Sort by distance (nearest first from vendor location)
-    orderPoints.sort((a, b) => a['distance'].compareTo(b['distance']));
-
-    // Create optimized route: driver -> vendor -> nearest customer -> ... -> farthest customer
-    List<LatLng> optimizedRoute = [driverLocation];
-    
-    // Add vendor location if found
-    if (vendorLocation != null) {
-      optimizedRoute.add(vendorLocation);
-    }
-
-    // Add all customer delivery locations
-    for (var orderPoint in orderPoints) {
-      optimizedRoute.add(orderPoint['point'] as LatLng);
-    }
-
-    return optimizedRoute;
+    return await DeliveryRouteService.optimizeDeliveryRoute(
+      orders: orders,
+      driverLocation: driverLocation,
+    );
   }
 
   Future<LatLng?> getVendorLocation(String vendorId) async {
-    try {
-      final vendorDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(vendorId)
-          .get();
-
-      if (vendorDoc.exists) {
-        final data = vendorDoc.data() as Map<String, dynamic>;
-        final double? lat = double.tryParse(data['address_latitude']?.toString() ?? '');
-        final double? lng = double.tryParse(data['address_longitude']?.toString() ?? '');
-        
-        if (lat != null && lng != null) {
-          return LatLng(lat, lng);
-        }
-      }
-    } catch (e) {
-      print('Error getting vendor location: $e');
-    }
-    return null;
+    return await DeliveryRouteService.getVendorLocation(vendorId);
   }
 
   Future<void> getOptimizedGroupRoute(List<LatLng> waypoints) async {
-    if (waypoints.length < 2) return;
-
     try {
-      // Try to get OSRM route for multiple waypoints
-      await _getOSRMMultiPointRoute(waypoints);
+      final route = await RouteService.getMultiPointRoute(waypoints);
+      setState(() {
+        routePoints = route;
+      });
     } catch (e) {
       print('Error getting optimized route: $e');
-      // Fallback: Create realistic multi-point route
-      _createRealisticMultiPointRoute(waypoints);
     }
   }
 
-  Future<void> _getOSRMMultiPointRoute(List<LatLng> waypoints) async {
-    final List<String> osrmServers = [
-      'https://router.project-osrm.org',
-      'https://routing.openstreetmap.de',
-      'https://osrm.map.bf-ds.de',
-    ];
-
-    for (String server in osrmServers) {
-      try {
-        // Build coordinates string for multiple waypoints
-        String coordinates = waypoints
-            .map((point) => '${point.longitude},${point.latitude}')
-            .join(';');
-
-        final String url =
-            '$server/route/v1/driving/$coordinates'
-            '?overview=full&geometries=geojson&steps=true';
-
-        final response = await http
-            .get(
-              Uri.parse(url),
-              headers: {'User-Agent': 'MealMommy/1.0 (Flutter App)'},
-            )
-            .timeout(const Duration(seconds: 15));
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          if (data['routes'] != null && data['routes'].isNotEmpty) {
-            final coordinates =
-                data['routes'][0]['geometry']['coordinates'] as List;
-
-            setState(() {
-              routePoints =
-                  coordinates
-                      .map<LatLng>(
-                        (coord) => LatLng(
-                          coord[1],
-                          coord[0],
-                        ), // OSRM returns [lon, lat]
-                      )
-                      .toList();
-            });
-
-            print(
-              'Successfully got multi-point route from OSRM server: $server',
-            );
-            return;
-          }
-        }
-      } catch (e) {
-        print('Failed to get multi-point route from $server: $e');
-        continue;
-      }
-    }
-
-    throw Exception('All OSRM servers failed for multi-point route');
-  }
-
-  void _createRealisticMultiPointRoute(List<LatLng> waypoints) {
-    List<LatLng> routePointsList = [];
-
-    // Create route segments between each pair of waypoints
-    for (int i = 0; i < waypoints.length - 1; i++) {
-      final LatLng start = waypoints[i];
-      final LatLng end = waypoints[i + 1];
-
-      // Add start point if it's the first segment
-      if (i == 0) {
-        routePointsList.add(start);
-      }
-
-      // Create realistic curve between points
-      final double latDiff = end.latitude - start.latitude;
-      final double lngDiff = end.longitude - start.longitude;
-      final double distance = calculateDistance(start, end);
-
-      // Number of intermediate points based on distance
-      final int numPoints = math.max(3, (distance * 5).round());
-
-      for (int j = 1; j <= numPoints; j++) {
-        final double progress = j / numPoints;
-
-        // Add realistic road-like variations
-        double latOffset = latDiff * progress;
-        double lngOffset = lngDiff * progress;
-
-        // Add some curve variation
-        final double curveFactor = math.sin(progress * math.pi) * 0.001;
-        latOffset += curveFactor;
-        lngOffset += curveFactor * 0.5;
-
-        routePointsList.add(
-          LatLng(start.latitude + latOffset, start.longitude + lngOffset),
-        );
-      }
-    }
-
-    setState(() {
-      routePoints = routePointsList;
-    });
-  }
-
-  void onOrderTapped(Map<String, dynamic> order) async {
+  void onOrderTapped(GroupOrder order) async {
     // If clicking the same order that's already selected, clear the route
-    if (selectedOrderId == order['id']) {
+    if (selectedOrderId == order.id) {
       clearRoute();
       return;
     }
@@ -466,18 +301,21 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
 
     // Since this comes from grouporders collection, treat it as a group order
     // Use the order ID as the group_id to find associated deliveries
-    String groupId = order['group_id'] ?? order['id']; // Use order ID if no group_id field
+    String groupId = order.id; // Use order ID as the group_id
     
     try {
       setState(() {
-        selectedOrderId = order['id'];
+        selectedOrderId = order.id;
       });
 
-      final List<Map<String, dynamic>> groupDeliveries = await getOrdersByGroupId(groupId);
+      final List<Order> groupDeliveries = await getOrdersByGroupId(groupId);
 
       if (groupDeliveries.isNotEmpty) {
+        // Convert to Map format for optimizeDeliveryRoute compatibility
+        final List<Map<String, dynamic>> deliveriesData = groupDeliveries.map((order) => order.toMap()..['id'] = order.id).toList();
+        
         // Optimize the delivery route (driver -> vendor -> nearest to farthest customers)
-        final List<LatLng> optimizedWaypoints = await optimizeDeliveryRoute(groupDeliveries);
+        final List<LatLng> optimizedWaypoints = await optimizeDeliveryRoute(deliveriesData);
 
         // Set markers for all delivery points (skip driver location, include vendor if present)
         setState(() {
@@ -512,7 +350,7 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     }
   }
 
-  void onAcceptOrder(Map<String, dynamic> order) {
+  void onAcceptOrder(GroupOrder order) async {
     // Check if driver is online before allowing order acceptance
     if (!isOnline) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -525,17 +363,114 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       return;
     }
 
-    // TODO: Implement accept order functionality
-    print('Accept order tapped for order: ${order['id']}');
-    
-    // Show success message when order is accepted
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Order ${order['id']} accepted successfully!'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    if (currentUser == null || order.id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error: Unable to accept order'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final orderData = order.toMap()..['id'] = order.id;
+      final success = await OrderService.acceptOrder(
+        order: orderData,
+        currentUserId: currentUser!.uid,
+      );
+
+      if (success) {
+        // Update widget state immediately
+        setState(() {
+          final orderIndex = groupOrders.indexWhere((o) => o.id == order.id);
+          if (orderIndex != -1) {
+            groupOrders[orderIndex] = order.copyWith(
+              assignedAt: Timestamp.now(),
+            );
+          }
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Order ${order.id} accepted successfully!'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Order has already been accepted by another driver'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        await _loadGroupOrders();
+      }
+    } catch (e) {
+      print('Error accepting order: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error accepting order: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  void _navigateToLiveDelivery(GroupOrder order) async {
+    try {
+      // Get all deliveries for this group order
+      String groupId = order.id;
+      final List<Order> groupDeliveries = await getOrdersByGroupId(groupId);
+      
+      // Convert to Map format for optimizeDeliveryRoute compatibility
+      final List<Map<String, dynamic>> deliveriesData = groupDeliveries.map((order) => order.toMap()..['id'] = order.id).toList();
+      
+      // Get the optimized route with vendor location
+      final List<LatLng> optimizedWaypoints = await optimizeDeliveryRoute(deliveriesData);
+      
+      // Get vendor information
+      LatLng? vendorLocation;
+      Map<String, dynamic>? vendorInfo;
+      if (groupDeliveries.isNotEmpty && groupDeliveries[0].vendorId.isNotEmpty) {
+        vendorLocation = await getVendorLocation(groupDeliveries[0].vendorId);
+        vendorInfo = await DeliveryRouteService.getVendorInfo(groupDeliveries[0].vendorId);
+      }
+      
+      // Navigate to live delivery page with complete data
+      final result = await Navigator.pushNamed(
+        context,
+        '/driver/live-delivery',
+        arguments: {
+          'groupOrder': order.toMap()..['id'] = order.id,
+          'deliveries': deliveriesData,
+          'optimizedWaypoints': optimizedWaypoints,
+          'vendorLocation': vendorLocation,
+          'vendorInfo': vendorInfo,
+          'currentUser': currentUser,
+          'driverLocation': driverLocation,
+        },
+      );
+      
+      // Refresh orders when returning from live delivery page
+      if (result != null || mounted) {
+        await _loadGroupOrders();
+        print('Refreshed orders after returning from live delivery');
+      }
+    } catch (e) {
+      print('Error preparing live delivery data: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading delivery data: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   void toggleOnlineStatus() {
@@ -565,106 +500,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       allDeliveryLocations.clear();
       currentGroupDeliveries.clear();
     });
-  }
-
-  Future<void> _generateTestGroupOrder() async {
-    try {
-      // Create a test group order with the specified structure
-      final testGroupOrder = {
-        'created_by': '',
-        'driver_id': '',
-        'scheduled_time': Timestamp.fromDate(DateTime(2025, 7, 1, 2, 30, 55)),
-        'status': 'open',
-        'vendor_id': '',
-      };
-
-      // Add to grouporders collection
-      final docRef = await FirebaseFirestore.instance
-          .collection('grouporders')
-          .add(testGroupOrder);
-
-      // Create some test orders for this group
-      final testOrders = [
-        {
-          'group_id': docRef.id,
-          'vendor_id': 'test_vendor_1',
-          'delivery_latitude': '3.1410',
-          'delivery_longitude': '101.6890',
-          'delivery_address': '123 Test Street, KL',
-          'delivery_fee': '5.00',
-          'status': 'pending',
-          'created_at': Timestamp.now(),
-        },
-        {
-          'group_id': docRef.id,
-          'vendor_id': 'test_vendor_1',
-          'delivery_latitude': '3.1450',
-          'delivery_longitude': '101.6850',
-          'delivery_address': '456 Sample Avenue, KL',
-          'delivery_fee': '6.50',
-          'status': 'pending',
-          'created_at': Timestamp.now(),
-        },
-        {
-          'group_id': docRef.id,
-          'vendor_id': 'test_vendor_1',
-          'delivery_latitude': '3.1380',
-          'delivery_longitude': '101.6920',
-          'delivery_address': '789 Demo Road, KL',
-          'delivery_fee': '4.50',
-          'status': 'pending',
-          'created_at': Timestamp.now(),
-        },
-      ];
-
-      // Add test orders to orders collection
-      for (var order in testOrders) {
-        await FirebaseFirestore.instance.collection('orders').add(order);
-      }
-
-      // Create test vendor user if doesn't exist
-      final vendorDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc('test_vendor_1')
-          .get();
-
-      if (!vendorDoc.exists) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc('test_vendor_1')
-            .set({
-          'uid': 'test_vendor_1',
-          'email': 'testvendor@example.com',
-          'name': 'Test Vendor Restaurant',
-          'phone_number': '+60123456789',
-          'address': 'Test Vendor Location, Kuala Lumpur',
-          'address_latitude': '3.1400',
-          'address_longitude': '101.6870',
-          'role': 'vendor',
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      }
-
-      // Reload group orders to show the new test data
-      await _loadGroupOrders();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Test group order with vendor route created successfully!'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 3),
-        ),
-      );
-    } catch (e) {
-      print('Error creating test group order: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error creating test data: $e'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
   }
 
   List<Polyline> _createColoredRouteSegments() {
@@ -726,11 +561,641 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     
     double totalFee = 0.0;
     for (var delivery in currentGroupDeliveries) {
-      final fee = double.tryParse(delivery['delivery_fee']?.toString() ?? '0') ?? 0.0;
-      totalFee += fee;
+      totalFee += delivery.deliveryFeeAsDouble;
     }
     
     return totalFee;
+  }
+
+  Color _getStatusColor(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'open':
+        return Colors.orange;
+      case 'closed':
+        return Colors.red;
+      case 'completed':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Widget _buildCountdownTimer(dynamic scheduledTime) {
+    if (scheduledTime == null) return const SizedBox.shrink();
+    
+    try {
+      DateTime targetTime;
+      if (scheduledTime is Timestamp) {
+        targetTime = scheduledTime.toDate();
+      } else if (scheduledTime is DateTime) {
+        targetTime = scheduledTime;
+      } else {
+        return const SizedBox.shrink();
+      }
+
+      return StreamBuilder<DateTime>(
+        stream: Stream.periodic(const Duration(seconds: 1), (_) => DateTime.now()),
+        builder: (context, snapshot) {
+          final now = DateTime.now();
+          final difference = targetTime.difference(now);
+          
+          if (difference.isNegative) {
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'OVERDUE',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            );
+          }
+          
+          final hours = difference.inHours;
+          final minutes = difference.inMinutes % 60;
+          final seconds = difference.inSeconds % 60;
+          
+          Color timerColor = Colors.green;
+          if (hours == 0 && minutes < 30) {
+            timerColor = Colors.red;
+          } else if (hours == 0 && minutes < 60) {
+            timerColor = Colors.orange;
+          }
+          
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: timerColor,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              hours > 0 
+                  ? '${hours}h ${minutes}m'
+                  : '${minutes}m ${seconds}s',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          );
+        },
+      );
+    } catch (e) {
+      return const SizedBox.shrink();
+    }
+  }
+
+  // Build dev tools button for testing
+  Widget _buildDevToolsButton() {
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        color: Colors.orange[600],
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(25),
+          onTap: () {
+            _showDevToolsMenu();
+          },
+          child: Center(
+            child: Icon(
+              Icons.developer_mode,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Show dev tools menu
+  void _showDevToolsMenu() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.8,
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '🛠️ Dev Tools',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange[700],
+                  ),
+                ),
+                SizedBox(height: 20),
+                _buildDevToolButton(
+                  'Create Sample Group Order',
+                  Icons.add_shopping_cart,
+                  () => _createSampleGroupOrder(),
+                ),
+                SizedBox(height: 12),
+                _buildDevToolButton(
+                  'List All Chat Rooms',
+                  Icons.chat_bubble_outline,
+                  () => _listAllChatRooms(),
+                ),
+                SizedBox(height: 12),
+                _buildDevToolButton(
+                  'Clear All Test Data',
+                  Icons.delete_sweep,
+                  () => _clearTestData(),
+                ),
+                SizedBox(height: 12),
+                _buildDevToolButton(
+                  'Create Test Users',
+                  Icons.people,
+                  () => _createTestUsers(),
+                ),
+                SizedBox(height: 20),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text('Close'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDevToolButton(String title, IconData icon, VoidCallback onTap) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 18),
+        label: Text(title),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.orange[100],
+          foregroundColor: Colors.orange[700],
+          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Dev Tools Functions
+  Future<void> _createSampleGroupOrder() async {
+    Navigator.of(context).pop(); // Close dialog first
+    
+    try {
+      // Create sample group order with auto-generated ID
+      final groupOrderRef = FirebaseFirestore.instance.collection('grouporders').doc();
+      final groupOrderId = groupOrderRef.id;
+      
+      // Create sample group order with your exact structure
+      await groupOrderRef.set({
+        'assigned_at': Timestamp.fromDate(DateTime.parse('2025-07-26 00:39:11')),
+        'completed_at': Timestamp.fromDate(DateTime.parse('2025-07-26 01:32:01')),
+        'current_delivery_index': 2,
+        'current_navigation_step': 3,
+        'driver_id': "",
+        'scheduled_time': Timestamp.fromDate(DateTime.parse('2025-07-01 02:30:55')),
+        'status': 'pending', // Set as pending so it can be accepted
+        'updated_at': Timestamp.now(),
+        'vendor_id': '',
+      });
+
+      // Create sample individual orders with your exact structure
+      final sampleOrders = [
+        {
+          'created_at': Timestamp.fromDate(DateTime.parse('2025-07-25 07:01:54')),
+          'delivery_address': '123 Test Street, KL',
+          'delivery_fee': '5.00',
+          'delivery_latitude': '3.1410',
+          'delivery_longitude': '101.6890',
+          'delivery_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:32:01')),
+          'group_id': groupOrderId,
+          'pickup_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:28:40')),
+          'status': 'confirmed', // Set as confirmed so it's ready for delivery
+          'updated_at': Timestamp.now(),
+          'vendor_id': 'test_vendor_1',
+          'customer_id': 'customer_sample_1', // Add customer ID for chat room creation
+        },
+        {
+          'created_at': Timestamp.fromDate(DateTime.parse('2025-07-25 07:01:54')),
+          'delivery_address': '456 Another Street, KL',
+          'delivery_fee': '5.00',
+          'delivery_latitude': '3.1500',
+          'delivery_longitude': '101.7000',
+          'delivery_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:35:01')),
+          'group_id': groupOrderId,
+          'pickup_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:28:40')),
+          'status': 'confirmed',
+          'updated_at': Timestamp.now(),
+          'vendor_id': 'test_vendor_1',
+          'customer_id': 'customer_sample_2', // Add customer ID for chat room creation
+        }
+      ];
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (var order in sampleOrders) {
+        final orderRef = FirebaseFirestore.instance.collection('orders').doc();
+        batch.set(orderRef, order);
+      }
+      await batch.commit();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Sample group order created: $groupOrderId'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Refresh orders
+      await _loadGroupOrders();
+      
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error creating sample order: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _listAllChatRooms() async {
+    Navigator.of(context).pop(); // Close dialog first
+    
+    try {
+      final chatRooms = await FirebaseFirestore.instance
+          .collection('chatrooms')
+          .get();
+
+      showDialog(
+        context: context,
+        builder: (context) => Dialog(
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            height: MediaQuery.of(context).size.height * 0.7,
+            padding: EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Text(
+                  '💬 All Chat Rooms (${chatRooms.docs.length})',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 16),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: chatRooms.docs.length,
+                    itemBuilder: (context, index) {
+                      final chatRoom = chatRooms.docs[index];
+                      final data = chatRoom.data();
+                      return Card(
+                        child: ListTile(
+                          title: Text('ID: ${chatRoom.id}'),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Participants: ${data['participants']?.length ?? 0}'),
+                              Text('Status: ${data['status'] ?? 'N/A'}'),
+                              Text('Last: ${data['lastMessage'] ?? 'No messages'}'),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text('Close'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error listing chat rooms: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearTestData() async {
+    Navigator.of(context).pop(); // Close dialog first
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('⚠️ Clear Test Data'),
+        content: Text('This will delete all sample orders and chat rooms. Continue?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              try {
+                // Delete sample group orders (by vendor_id = empty string or test_vendor_1)
+                final sampleOrders = await FirebaseFirestore.instance
+                    .collection('grouporders')
+                    .where('vendor_id', whereIn: ['', 'test_vendor_1'])
+                    .get();
+
+                final batch = FirebaseFirestore.instance.batch();
+                for (var doc in sampleOrders.docs) {
+                  batch.delete(doc.reference);
+                }
+
+                // Delete sample individual orders
+                final sampleIndividualOrders = await FirebaseFirestore.instance
+                    .collection('orders')
+                    .where('vendor_id', isEqualTo: 'test_vendor_1')
+                    .get();
+
+                for (var doc in sampleIndividualOrders.docs) {
+                  batch.delete(doc.reference);
+                }
+
+                // Delete sample chat rooms (containing test data)
+                final allChatRooms = await FirebaseFirestore.instance
+                    .collection('chatrooms')
+                    .get();
+
+                for (var doc in allChatRooms.docs) {
+                  final data = doc.data();
+                  final participants = data['participants'] as List<dynamic>? ?? [];
+                  
+                  // Delete if contains sample users
+                  if (participants.contains('customer_sample_1') || 
+                      participants.contains('customer_sample_2') ||
+                      participants.contains('vendor_sample') ||
+                      doc.id.contains('sample_')) {
+                    batch.delete(doc.reference);
+                  }
+                }
+
+                // Delete sample chat messages
+                final allMessages = await FirebaseFirestore.instance
+                    .collection('chatmessages')
+                    .get();
+
+                for (var doc in allMessages.docs) {
+                  final data = doc.data();
+                  final chatRoomId = data['chatRoomId'] as String? ?? '';
+                  
+                  // Delete messages from sample chat rooms
+                  if (chatRoomId.contains('sample_') || chatRoomId.startsWith('chat_sample_')) {
+                    batch.delete(doc.reference);
+                  }
+                }
+
+                await batch.commit();
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('✅ Test data cleared successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+
+                await _loadGroupOrders();
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ Error clearing data: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createTestUsers() async {
+    Navigator.of(context).pop(); // Close dialog first
+    
+    try {
+      final testUsers = [
+        {
+          'uid': 'test_vendor_1',
+          'name': 'Test Vendor Restaurant',
+          'email': 'vendor@test.com',
+          'role': 'vendor',
+          'phone': '+60123456790',
+          'address': 'Test Restaurant Address, KL',
+        },
+        {
+          'uid': 'customer_sample_1',
+          'name': 'Alice Test Customer',
+          'email': 'alice@test.com',
+          'role': 'customer',
+          'phone': '+60123456791',
+          'address': '123 Test Street, KL',
+        },
+        {
+          'uid': 'customer_sample_2',
+          'name': 'Bob Test Customer',
+          'email': 'bob@test.com',
+          'role': 'customer',
+          'phone': '+60123456792',
+          'address': '456 Another Street, KL',
+        }
+      ];
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (var user in testUsers) {
+        final userRef = FirebaseFirestore.instance.collection('users').doc(user['uid'] as String);
+        batch.set(userRef, {
+          ...user,
+          'created_at': Timestamp.now(),
+          'updated_at': Timestamp.now(),
+        });
+      }
+
+      await batch.commit();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Test users created successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error creating test users: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Build small chat button for bottom right corner
+  Widget _buildChatButton() {
+    // Always show the button if user is logged in
+    if (currentUser == null) {
+      return SizedBox.shrink();
+    }
+
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: Colors.green[600], // Always green since we'll show all active chats
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 6,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: () async {
+            await _navigateToActiveDeliveryChat();
+          },
+          child: Stack(
+            children: [
+              Center(
+                child: Icon(
+                  Icons.chat_bubble,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              // Unread indicator dot
+              StreamBuilder<bool>(
+                stream: _getUnreadMessagesStream(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasData && snapshot.data == true) {
+                    return Positioned(
+                      right: 10,
+                      top: 10,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    );
+                  }
+                  return SizedBox.shrink();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Navigate to chat room selection or directly to chat if only one room
+  Future<void> _navigateToActiveDeliveryChat() async {
+    if (currentUser == null) return;
+    
+    try {
+      // Get all active chat rooms for the user
+      final chatRooms = await ChatService.getUserChatRooms(currentUser!.uid);
+      
+      if (chatRooms.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No active chat rooms found'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      if (chatRooms.length == 1) {
+        // Navigate directly to the single chat room
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatPage(
+                chatRoomId: chatRooms.first['id'],
+                currentUserId: currentUser!.uid,
+              ),
+            ),
+          );
+        }
+      } else {
+        // Navigate to chat room selection page
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatRoomListPage(
+                currentUserId: currentUser!.uid,
+                chatRooms: chatRooms,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error navigating to chat: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to open chat'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Check for unread messages
+  Stream<bool> _getUnreadMessagesStream() {
+    if (currentUser == null) {
+      return Stream.value(false);
+    }
+    
+    return ChatService.hasUnreadMessages(currentUser!.uid).asStream();
   }
 
   @override
@@ -746,9 +1211,11 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           print('Profile tapped');
         },
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // Top box - 55% of available space
+          Column(
+            children: [
+              // Top box - 55% of available space
           Expanded(
             flex: 11,
             child: Container(
@@ -885,38 +1352,38 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                   isLoading
                       ? const Center(child: CircularProgressIndicator())
                       : groupOrders.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text(
-                                'No group orders found',
-                                style: TextStyle(fontSize: 16, color: Colors.grey),
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                onPressed: _generateTestGroupOrder,
-                                icon: const Icon(Icons.add_circle_outline),
-                                label: const Text('Generate Test Order'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blue,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 12,
-                                  ),
+                      ? RefreshIndicator(
+                          onRefresh: () async {
+                            await _loadGroupOrders();
+                          },
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: const [
+                              SizedBox(height: 200),
+                              Center(
+                                child: Text(
+                                  'No group orders found\nPull down to refresh',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 16, color: Colors.grey),
                                 ),
                               ),
                             ],
                           ),
                         )
-                      : ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: groupOrders.length,
-                        itemBuilder: (context, index) {
+                      : RefreshIndicator(
+                          onRefresh: () async {
+                            await _loadGroupOrders();
+                          },
+                          child: ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(16),
+                            itemCount: groupOrders.length,
+                            itemBuilder: (context, index) {
                           final order = groupOrders[index];
                           final bool isSelected =
-                              selectedOrderId == order['id'];
+                              selectedOrderId == order.id;
+                          final bool isAssignedToMe = 
+                              order.driverId == currentUser?.uid;
 
                           return GestureDetector(
                             onTap: () => onOrderTapped(order),
@@ -927,14 +1394,18 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                 color:
                                     isSelected
                                         ? Colors.blue[50]
-                                        : Colors.grey[50],
+                                        : isAssignedToMe 
+                                            ? Colors.green[50]
+                                            : Colors.grey[50],
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
                                   color:
                                       isSelected
                                           ? Colors.blue
-                                          : Colors.grey[300]!,
-                                  width: isSelected ? 2 : 1,
+                                          : isAssignedToMe
+                                              ? Colors.green
+                                              : Colors.grey[300]!,
+                                  width: isSelected || isAssignedToMe ? 2 : 1,
                                 ),
                               ),
                               child: Column(
@@ -948,7 +1419,28 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                           fontWeight: FontWeight.bold,
                                         ),
                                       ),
-                                      Text('${order['id'] ?? 'N/A'}'),
+                                      Text('${order.id}'),
+                                      if (isAssignedToMe) ...[
+                                        const Spacer(),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, 
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.green,
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: const Text(
+                                            'MY ORDER',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                   const SizedBox(height: 4),
@@ -961,29 +1453,15 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                         ),
                                       ),
                                       Text(
-                                        '${_formatTimestamp(order['scheduled_time'])}',
+                                        '${_formatTimestamp(order.scheduledTime)}',
                                       ),
+                                      if (isAssignedToMe && order.scheduledTime != null) ...[
+                                        const SizedBox(width: 8),
+                                        _buildCountdownTimer(order.scheduledTime),
+                                      ],
                                     ],
                                   ),
-                                  if (order['delivery_address'] != null) ...[
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        const Text(
-                                          'Address: ',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: Text(
-                                            '${order['delivery_address']}',
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                  if (order['status'] != null) ...[
+                                  if (order.status.isNotEmpty) ...[
                                     const SizedBox(height: 4),
                                     Row(
                                       children: [
@@ -993,7 +1471,24 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
-                                        Text('${order['status']}'),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: _getStatusColor(order.status),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            '${order.status}'.toUpperCase(),
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ],
@@ -1001,33 +1496,61 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      // Accept Order Button
-                                      ElevatedButton.icon(
-                                        onPressed: isOnline ? () => onAcceptOrder(order) : null,
-                                        icon: Icon(
-                                          Icons.check, 
-                                          size: 18,
-                                          color: isOnline ? Colors.white : Colors.grey[400],
-                                        ),
-                                        label: Text(
-                                          isOnline ? 'Accept Order' : 'Go Online to Accept',
-                                          style: TextStyle(
+                                      // Different button based on order status
+                                      if (isAssignedToMe)
+                                        ElevatedButton.icon(
+                                          onPressed: () => _navigateToLiveDelivery(order),
+                                          icon: const Icon(
+                                            Icons.navigation, 
+                                            size: 18,
+                                            color: Colors.white,
+                                          ),
+                                          label: const Text(
+                                            'View Order',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.blue,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 8,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            elevation: 2,
+                                          ),
+                                        )
+                                      else
+                                        ElevatedButton.icon(
+                                          onPressed: isOnline ? () => onAcceptOrder(order) : null,
+                                          icon: Icon(
+                                            Icons.check, 
+                                            size: 18,
                                             color: isOnline ? Colors.white : Colors.grey[400],
                                           ),
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: isOnline ? Colors.green : Colors.grey[300],
-                                          foregroundColor: isOnline ? Colors.white : Colors.grey[400],
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 16,
-                                            vertical: 8,
+                                          label: Text(
+                                            isOnline ? 'Accept Order' : 'Go Online to Accept',
+                                            style: TextStyle(
+                                              color: isOnline ? Colors.white : Colors.grey[400],
+                                            ),
                                           ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(6),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: isOnline ? Colors.green : Colors.grey[300],
+                                            foregroundColor: isOnline ? Colors.white : Colors.grey[400],
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 8,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            elevation: isOnline ? 2 : 0,
                                           ),
-                                          elevation: isOnline ? 2 : 0,
                                         ),
-                                      ),
                                     ],
                                   ),
                                   
@@ -1148,16 +1671,24 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                           );
                         },
                       ),
+                        ),
             ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _generateTestGroupOrder,
-        icon: const Icon(Icons.add_location),
-        label: const Text('Generate Test Order'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+          // Positioned dev tools button above chat button
+          Positioned(
+            bottom: 90,
+            right: 20,
+            child: _buildDevToolsButton(),
+          ),
+          // Positioned chat button in bottom right
+          Positioned(
+            bottom: 20,
+            right: 20,
+            child: _buildChatButton(),
+          ),
+        ],
       ),
     );
   }

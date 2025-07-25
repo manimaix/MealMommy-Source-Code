@@ -6,19 +6,34 @@ import 'register_page.dart';
 import 'customer/customer_home.dart';
 import 'vendor/homepage.dart';
 import 'driver/driver_home.dart';
-import 'driver/task_list_page.dart';
 import 'driver/live_delivery_page.dart';
 import 'notification_page.dart';
 import 'vendor/menu.dart';
 import 'vendor/foodlist.dart';
 import 'vendor/review.dart';
 import 'Vendor/addfood.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:firebase_app_check/firebase_app_check.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Configure Firebase App Check based on platform
+  if (kIsWeb) {
+    // For web development, you can disable App Check or use a proper reCAPTCHA key
+    // await FirebaseAppCheck.instance.activate(
+    //   webProvider: ReCaptchaV3Provider('your-recaptcha-site-key'),
+    // );
+  } else {
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.debug,
+      appleProvider: AppleProvider.debug,
+    );
+  }
+
   runApp(const MyApp());
 }
 
@@ -41,7 +56,6 @@ class MyApp extends StatelessWidget {
         '/customer': (context) => const CustomerHome(),
         '/vendor': (context) => const HomePage(),
         '/driver': (context) => const DriverHome(),
-        '/driver/tasks': (context) => const TaskListPage(),
         '/driver/live-delivery': (context) => const LiveDeliveryPage(),
         '/notification': (context) => const NotificationPage(),
         '/menu': (context) => const MenuPage(),
@@ -167,8 +181,33 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Login'),
+        title: Row(
+          children: [
+            Image.asset(
+              'assets/icons/logo.png',
+              width: 28,
+              height: 28,
+              errorBuilder: (context, error, stackTrace) {
+                // Fallback to material icon if asset fails to load
+                return Icon(
+                  Icons.restaurant_menu,
+                  color: Theme.of(context).primaryColor,
+                  size: 28,
+                );
+              },
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'MealMommy',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
         elevation: 0,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Theme.of(context).primaryColor,
       ),
       body: SafeArea(
         child: Center(
