@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import '../models/models.dart';
 import '../services/chat_service.dart';
+import '../chat_page.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:math' as math;
@@ -63,10 +64,115 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
         driverLocation = args['driverLocation'];
       });
       
+      // Refresh delivery data from Firebase to get latest status
+      _refreshDeliveryDataFromFirebase();
+      
       // Generate route if waypoints are available
       if (optimizedWaypoints.isNotEmpty) {
         _generateCurrentStepRoute();
       }
+    }
+  }
+
+  Future<void> _refreshDeliveryDataFromFirebase() async {
+    if (groupOrder == null) return;
+    
+    try {
+      // Get latest group order data
+      final groupOrderDoc = await FirebaseFirestore.instance
+          .collection('grouporders')
+          .doc(groupOrder!.id)
+          .get();
+      
+      if (groupOrderDoc.exists) {
+        final updatedGroupOrder = GroupOrder.fromFirestore(
+          groupOrderDoc.data()!,
+          groupOrderDoc.id,
+        );
+        
+        // Get latest individual orders data
+        final ordersSnapshot = await FirebaseFirestore.instance
+            .collection('orders')
+            .where('group_id', isEqualTo: groupOrder!.id)
+            .get();
+        
+        final updatedDeliveries = ordersSnapshot.docs.map((doc) {
+          return Order.fromFirestore(doc.data(), doc.id);
+        }).toList();
+        
+        setState(() {
+          groupOrder = updatedGroupOrder;
+          deliveries = updatedDeliveries;
+          
+          // Restore delivery state from Firebase if available
+          currentDeliveryIndex = groupOrder!.currentDeliveryIndex ?? 0;
+          currentNavigationStep = groupOrder!.currentNavigationStep ?? 0;
+          
+          // Determine current status based on saved state
+          _restoreCurrentStatus();
+        });
+      }
+    } catch (e) {
+      print('Error refreshing delivery data: $e');
+      // Fallback to original state restoration
+      if (groupOrder != null) {
+        setState(() {
+          currentDeliveryIndex = groupOrder!.currentDeliveryIndex ?? 0;
+          currentNavigationStep = groupOrder!.currentNavigationStep ?? 0;
+          _restoreCurrentStatus();
+        });
+      }
+    }
+  }
+
+  void _restoreCurrentStatus() {
+    if (groupOrder == null) return;
+    
+    // Use the status from Firebase if it's already set and not default
+    if (groupOrder!.status.isNotEmpty && 
+        groupOrder!.status != 'pending' && 
+        groupOrder!.status != 'assigned' &&
+        groupOrder!.status != 'open') {
+      currentStatus = groupOrder!.status;
+      return;
+    }
+    
+    // Otherwise, determine status based on navigation step and delivery index
+    if (currentNavigationStep == 0) {
+      currentStatus = 'Heading to Vendor';
+    } else if (currentNavigationStep == 1) {
+      // Check if orders are already picked up (have pickup_time or status = delivering)
+      bool ordersPickedUp = deliveries.any((order) => 
+          order.pickupTime != null || 
+          order.status == 'delivering' || 
+          order.status == 'delivered');
+      
+      if (ordersPickedUp) {
+        currentStatus = 'Heading to Customer ${currentDeliveryIndex + 1}';
+      } else {
+        currentStatus = 'At Vendor - Picking Up';
+      }
+    } else if (currentNavigationStep > 1) {
+      // Check if current delivery is completed
+      if (currentDeliveryIndex < deliveries.length) {
+        final currentOrder = deliveries[currentDeliveryIndex];
+        if (currentOrder.status == 'delivered') {
+          // If current order is delivered but we're still on this step, 
+          // we're heading to next customer
+          if (currentDeliveryIndex + 1 < deliveries.length) {
+            currentStatus = 'Heading to Customer ${currentDeliveryIndex + 2}';
+          } else {
+            currentStatus = 'All Deliveries Complete';
+          }
+        } else {
+          // Still delivering to current customer
+          currentStatus = 'At Customer ${currentDeliveryIndex + 1} - Delivering';
+        }
+      } else {
+        currentStatus = 'All Deliveries Complete';
+      }
+    } else {
+      currentStatus = 'Heading to Vendor';
     }
   }
 
@@ -508,6 +614,7 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
         return 'Mark: Final Delivery Complete';
       }
     }
+    
     return 'Update Status';
   }
 
@@ -558,6 +665,37 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
         backgroundColor: Colors.green[600],
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          StreamBuilder<bool>(
+            stream: _hasUnreadMessagesStream(),
+            builder: (context, snapshot) {
+              final hasUnread = snapshot.data ?? false;
+              return Stack(
+                children: [
+                  IconButton(
+                    onPressed: _openChatRoom,
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    tooltip: 'Open Chat',
+                  ),
+                  if (hasUnread)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
       ),
       body: groupOrder == null
           ? const Center(child: CircularProgressIndicator())
@@ -582,6 +720,47 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
                 ),
               ],
             ),
+      floatingActionButton: StreamBuilder<bool>(
+        stream: _hasUnreadMessagesStream(),
+        builder: (context, snapshot) {
+          final hasUnread = snapshot.data ?? false;
+          return Stack(
+            children: [
+              FloatingActionButton(
+                onPressed: _openChatRoom,
+                backgroundColor: Colors.green[600],
+                foregroundColor: Colors.white,
+                tooltip: 'Open Chat',
+                child: const Icon(Icons.chat),
+              ),
+              if (hasUnread)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        '!',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -1059,7 +1238,23 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: _openChatRoom,
+                                icon: const Icon(Icons.chat, size: 16),
+                                label: const Text(
+                                  'Chat',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () => _openNavigationToCustomer(delivery),
@@ -1154,18 +1349,37 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
             ),
           ),
           const SizedBox(width: 8),
-          ElevatedButton.icon(
-            onPressed: () => _callVendor(),
-            icon: const Icon(Icons.phone, size: 16),
-            label: const Text(
-              'Call',
-              overflow: TextOverflow.ellipsis,
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ElevatedButton.icon(
+                onPressed: () => _callVendor(),
+                icon: const Icon(Icons.phone, size: 16),
+                label: const Text(
+                  'Call',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _openChatRoom,
+                icon: const Icon(Icons.chat, size: 16),
+                label: const Text(
+                  'Chat',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1234,6 +1448,203 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
           duration: Duration(seconds: 2),
         ),
       );
+    }
+  }
+
+  Stream<bool> _hasUnreadMessagesStream() {
+    if (currentUser == null) {
+      return Stream.value(false);
+    }
+    
+    return ChatService.hasUnreadMessages(currentUser!.uid).asStream();
+  }
+
+  void _openChatRoom() async {
+    if (groupOrder == null || currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to open chat - order or user data not available'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      print('🔍 Looking for chat room for group order: ${groupOrder!.id}');
+      
+      // Get the chat room for this group order
+      final chatRooms = await ChatService.getUserChatRooms(currentUser!.uid);
+      
+      print('📋 Found ${chatRooms.length} chat rooms for user: ${currentUser!.uid}');
+      
+      // Find the chat room for this specific order
+      Map<String, dynamic>? orderChatRoom;
+      for (var chatRoom in chatRooms) {
+        print('🏠 Checking chat room: ${chatRoom['id']} with group_id: ${chatRoom['group_id']}');
+        
+        // Check the correct field name used by ChatService
+        if (chatRoom['group_id'] == groupOrder!.id) {
+          orderChatRoom = chatRoom;
+          print('✅ Found matching chat room: ${chatRoom['id']}');
+          break;
+        }
+      }
+
+      // Close loading indicator
+      if (mounted) Navigator.of(context).pop();
+
+      if (orderChatRoom != null && mounted) {
+        print('🚀 Navigating to chat room: ${orderChatRoom['id']}');
+        
+        // Navigate to the specific chat room
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatPage(
+              chatRoomId: orderChatRoom!['id'],
+              currentUserId: currentUser!.uid,
+            ),
+          ),
+        );
+        
+        print('⬅️ Returned from chat with result: $result');
+      } else {
+        print('❌ No chat room found, attempting to create one...');
+        
+        // Attempt to create a new chat room
+        await _createChatRoomForOrder();
+      }
+    } catch (e) {
+      // Close loading indicator if still open
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+      
+      print('❌ Error opening chat: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening chat: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _openChatRoom,
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _createChatRoomForOrder() async {
+    if (groupOrder == null || currentUser == null) return;
+
+    try {
+      // Show loading for chat room creation
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Creating chat room...'),
+              ],
+            ),
+          ),
+        );
+      }
+
+      // Get vendor ID from deliveries or vendorInfo
+      String vendorId = '';
+      if (deliveries.isNotEmpty && deliveries[0].vendorId.isNotEmpty) {
+        vendorId = deliveries[0].vendorId;
+      } else if (vendorInfo != null && vendorInfo!['id'] != null) {
+        vendorId = vendorInfo!['id'];
+      }
+
+      // Get customer IDs from deliveries
+      List<String> customerIds = [];
+      for (var delivery in deliveries) {
+        if (delivery.customerId.isNotEmpty) {
+          customerIds.add(delivery.customerId);
+        }
+      }
+
+      print('🔨 Creating chat room with:');
+      print('   Group Order ID: ${groupOrder!.id}');
+      print('   Driver ID: ${currentUser!.uid}');
+      print('   Vendor ID: $vendorId');
+      print('   Customer IDs: $customerIds');
+
+      // Create the chat room
+      final chatRoomId = await ChatService.createOrderChatRoom(
+        groupOrderId: groupOrder!.id,
+        driverId: currentUser!.uid,
+        vendorId: vendorId,
+        customerIds: customerIds,
+      );
+
+      // Close loading dialog
+      if (mounted) Navigator.of(context).pop();
+
+      if (chatRoomId != null && mounted) {
+        print('✅ Chat room created successfully: $chatRoomId');
+        
+        // Navigate to the newly created chat room
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatPage(
+              chatRoomId: chatRoomId,
+              currentUserId: currentUser!.uid,
+            ),
+          ),
+        );
+        
+        print('⬅️ Returned from new chat with result: $result');
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to create chat room'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+      
+      print('❌ Error creating chat room: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error creating chat room: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 }

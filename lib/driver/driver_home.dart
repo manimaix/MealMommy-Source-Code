@@ -8,9 +8,11 @@ import '../services/delivery_route_service.dart';
 import '../services/chat_service.dart';
 import '../chat_page.dart';
 import '../chat_room_list_page.dart';
+import 'driver_revenue.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:flutter_svg/svg.dart';
 import 'dart:math' as math;
 import 'dart:async';
 
@@ -25,6 +27,7 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   AppUser? currentUser;
   DeliveryPreferences? deliveryPreferences;
   List<GroupOrder> groupOrders = [];
+  List<GroupOrder> filteredGroupOrders = []; // Filtered list for display
   bool isLoading = false;
   bool isOnline = false; // Online status for driver
   List<LatLng> routePoints = [];
@@ -37,6 +40,9 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     101.6869,
   ); // Current driver location (Kuala Lumpur)
   
+  // Filter settings
+  String selectedFilter = 'all'; // 'all', 'my_orders', 'available', 'urgent', 'today'
+  
   // Animation controllers for smooth expansion
   late AnimationController _expansionController;
   late Animation<double> _expansionAnimation;
@@ -47,6 +53,7 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    filteredGroupOrders = []; // Initialize filtered list
     _expansionController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
@@ -152,6 +159,8 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
         groupOrders = orders;
         isLoading = false;
       });
+      // Apply current filter after loading
+      _applyFilter();
     } catch (e) {
       setState(() {
         isLoading = false;
@@ -213,6 +222,172 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
         );
   }
 
+  void _applyFilter() {
+    if (currentUser == null) {
+      setState(() {
+        filteredGroupOrders = groupOrders;
+      });
+      return;
+    }
+
+    List<GroupOrder> filtered = [];
+    final DateTime now = DateTime.now();
+    final DateTime todayStart = DateTime(now.year, now.month, now.day);
+    final DateTime todayEnd = todayStart.add(Duration(days: 1));
+
+    switch (selectedFilter) {
+      case 'all':
+        filtered = List.from(groupOrders);
+        break;
+        
+      case 'my_orders':
+        filtered = groupOrders.where((order) => 
+          order.driverId == currentUser!.uid
+        ).toList();
+        break;
+        
+      case 'available':
+        filtered = groupOrders.where((order) => 
+          order.driverId == null || order.driverId!.isEmpty
+        ).toList();
+        break;
+        
+      case 'urgent':
+        filtered = groupOrders.where((order) {
+          if (order.scheduledTime == null) return false;
+          final orderTime = order.scheduledTime!.toDate();
+          final timeDiff = orderTime.difference(now);
+          // Show orders due within next 2 hours or overdue
+          return timeDiff.inHours <= 2;
+        }).toList();
+        break;
+        
+      case 'today':
+        filtered = groupOrders.where((order) {
+          if (order.scheduledTime == null) return false;
+          final orderTime = order.scheduledTime!.toDate();
+          return orderTime.isAfter(todayStart) && orderTime.isBefore(todayEnd);
+        }).toList();
+        break;
+        
+      default:
+        filtered = List.from(groupOrders);
+    }
+
+    setState(() {
+      filteredGroupOrders = filtered;
+    });
+  }
+
+  void _onFilterChanged(String? newFilter) {
+    if (newFilter != null && newFilter != selectedFilter) {
+      setState(() {
+        selectedFilter = newFilter;
+      });
+      _applyFilter();
+    }
+  }
+
+  Widget _buildFilterDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Icon(Icons.filter_list, color: Colors.grey[600], size: 20),
+          const SizedBox(width: 8),
+          Text(
+            'Filter:',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[700],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: selectedFilter,
+                  isExpanded: true,
+                  style: TextStyle(color: Colors.grey[800], fontSize: 14),
+                  icon: Icon(Icons.keyboard_arrow_down, color: Colors.grey[600]),
+                  onChanged: _onFilterChanged,
+                  items: [
+                    DropdownMenuItem(
+                      value: 'all',
+                      child: Row(
+                        children: [
+                          Icon(Icons.list_alt, size: 16, color: Colors.grey[600]),
+                          const SizedBox(width: 8),
+                          const Text('All Orders'),
+                        ],
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: 'my_orders',
+                      child: Row(
+                        children: [
+                          Icon(Icons.assignment_ind, size: 16, color: Colors.green[600]),
+                          const SizedBox(width: 8),
+                          const Text('My Orders'),
+                        ],
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: 'available',
+                      child: Row(
+                        children: [
+                          Icon(Icons.assignment, size: 16, color: Colors.blue[600]),
+                          const SizedBox(width: 8),
+                          const Text('Available'),
+                        ],
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: 'urgent',
+                      child: Row(
+                        children: [
+                          Icon(Icons.access_alarm, size: 16, color: Colors.red[600]),
+                          const SizedBox(width: 8),
+                          const Text('Urgent (< 2hrs)'),
+                        ],
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: 'today',
+                      child: Row(
+                        children: [
+                          Icon(Icons.today, size: 16, color: Colors.orange[600]),
+                          const SizedBox(width: 8),
+                          const Text('Today'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '(${filteredGroupOrders.length})',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Public method to manually refresh orders (can be called from other widgets)
   Future<void> refreshOrders() async {
     await _loadGroupOrders();
@@ -225,7 +400,42 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       driverLocation: driverLocation,
     );
     
-    return ordersData.map((data) => GroupOrder.fromFirestore(data, data['id'] ?? '')).toList();
+    final orders = ordersData.map((data) => GroupOrder.fromFirestore(data, data['id'] ?? '')).toList();
+    
+    // Sort orders by priority:
+    // 1. First: My accepted orders (assigned to current driver)
+    // 2. Then: Available orders sorted by closest scheduled time
+    orders.sort((a, b) {
+      final bool aIsMyOrder = a.driverId == currentUser?.uid;
+      final bool bIsMyOrder = b.driverId == currentUser?.uid;
+      
+      // My orders come first
+      if (aIsMyOrder && !bIsMyOrder) return -1;
+      if (!aIsMyOrder && bIsMyOrder) return 1;
+      
+      // If both are my orders or both are available, sort by scheduled time
+      final DateTime now = DateTime.now();
+      
+      // Handle null scheduled times (put them at the end)
+      if (a.scheduledTime == null && b.scheduledTime == null) return 0;
+      if (a.scheduledTime == null) return 1;
+      if (b.scheduledTime == null) return -1;
+      
+      final DateTime aTime = a.scheduledTime!.toDate();
+      final DateTime bTime = b.scheduledTime!.toDate();
+      
+      // For my orders, show the most urgent ones first (closest to current time)
+      if (aIsMyOrder && bIsMyOrder) {
+        final Duration aDiff = aTime.difference(now).abs();
+        final Duration bDiff = bTime.difference(now).abs();
+        return aDiff.compareTo(bDiff);
+      }
+      
+      // For available orders, show the earliest scheduled ones first
+      return aTime.compareTo(bTime);
+    });
+    
+    return orders;
   }
 
 
@@ -716,24 +926,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                   Icons.add_shopping_cart,
                   () => _createSampleGroupOrder(),
                 ),
-                SizedBox(height: 12),
-                _buildDevToolButton(
-                  'List All Chat Rooms',
-                  Icons.chat_bubble_outline,
-                  () => _listAllChatRooms(),
-                ),
-                SizedBox(height: 12),
-                _buildDevToolButton(
-                  'Clear All Test Data',
-                  Icons.delete_sweep,
-                  () => _clearTestData(),
-                ),
-                SizedBox(height: 12),
-                _buildDevToolButton(
-                  'Create Test Users',
-                  Icons.people,
-                  () => _createTestUsers(),
-                ),
                 SizedBox(height: 20),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -777,32 +969,26 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       
       // Create sample group order with your exact structure
       await groupOrderRef.set({
-        'assigned_at': Timestamp.fromDate(DateTime.parse('2025-07-26 00:39:11')),
-        'completed_at': Timestamp.fromDate(DateTime.parse('2025-07-26 01:32:01')),
-        'current_delivery_index': 2,
-        'current_navigation_step': 3,
         'driver_id': "",
-        'scheduled_time': Timestamp.fromDate(DateTime.parse('2025-07-01 02:30:55')),
+        'scheduled_time': Timestamp.fromDate(DateTime.now().add(Duration(hours: 1))),
         'status': 'pending', // Set as pending so it can be accepted
         'updated_at': Timestamp.now(),
-        'vendor_id': '',
+        'vendor_id': 'tBsSsfZHD6TBXuMXgw5uoZZF1l32',
       });
 
       // Create sample individual orders with your exact structure
       final sampleOrders = [
         {
-          'created_at': Timestamp.fromDate(DateTime.parse('2025-07-25 07:01:54')),
+          'created_at': Timestamp.now(),
           'delivery_address': '123 Test Street, KL',
           'delivery_fee': '5.00',
           'delivery_latitude': '3.1410',
           'delivery_longitude': '101.6890',
-          'delivery_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:32:01')),
           'group_id': groupOrderId,
-          'pickup_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:28:40')),
-          'status': 'confirmed', // Set as confirmed so it's ready for delivery
+          'status': 'pending',
           'updated_at': Timestamp.now(),
-          'vendor_id': 'test_vendor_1',
-          'customer_id': 'customer_sample_1', // Add customer ID for chat room creation
+          'vendor_id': 'tBsSsfZHD6TBXuMXgw5uoZZF1l32',
+          'customer_id': '80TRCThr3COdsx2dhBEQYKeCDMx2', // Add customer ID for chat room creation
         },
         {
           'created_at': Timestamp.fromDate(DateTime.parse('2025-07-25 07:01:54')),
@@ -810,13 +996,11 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           'delivery_fee': '5.00',
           'delivery_latitude': '3.1500',
           'delivery_longitude': '101.7000',
-          'delivery_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:35:01')),
           'group_id': groupOrderId,
-          'pickup_time': Timestamp.fromDate(DateTime.parse('2025-07-26 01:28:40')),
-          'status': 'confirmed',
+          'status': 'pending',
           'updated_at': Timestamp.now(),
-          'vendor_id': 'test_vendor_1',
-          'customer_id': 'customer_sample_2', // Add customer ID for chat room creation
+          'vendor_id': 'tBsSsfZHD6TBXuMXgw5uoZZF1l32',
+          'customer_id': '80TRCThr3COdsx2dhBEQYKeCDMx2', // Add customer ID for chat room creation
         }
       ];
 
@@ -847,225 +1031,8 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _listAllChatRooms() async {
-    Navigator.of(context).pop(); // Close dialog first
-    
-    try {
-      final chatRooms = await FirebaseFirestore.instance
-          .collection('chatrooms')
-          .get();
 
-      showDialog(
-        context: context,
-        builder: (context) => Dialog(
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.9,
-            height: MediaQuery.of(context).size.height * 0.7,
-            padding: EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Text(
-                  '💬 All Chat Rooms (${chatRooms.docs.length})',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 16),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: chatRooms.docs.length,
-                    itemBuilder: (context, index) {
-                      final chatRoom = chatRooms.docs[index];
-                      final data = chatRoom.data();
-                      return Card(
-                        child: ListTile(
-                          title: Text('ID: ${chatRoom.id}'),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Participants: ${data['participants']?.length ?? 0}'),
-                              Text('Status: ${data['status'] ?? 'N/A'}'),
-                              Text('Last: ${data['lastMessage'] ?? 'No messages'}'),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text('Close'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Error listing chat rooms: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
 
-  Future<void> _clearTestData() async {
-    Navigator.of(context).pop(); // Close dialog first
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('⚠️ Clear Test Data'),
-        content: Text('This will delete all sample orders and chat rooms. Continue?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.of(context).pop();
-              try {
-                // Delete sample group orders (by vendor_id = empty string or test_vendor_1)
-                final sampleOrders = await FirebaseFirestore.instance
-                    .collection('grouporders')
-                    .where('vendor_id', whereIn: ['', 'test_vendor_1'])
-                    .get();
-
-                final batch = FirebaseFirestore.instance.batch();
-                for (var doc in sampleOrders.docs) {
-                  batch.delete(doc.reference);
-                }
-
-                // Delete sample individual orders
-                final sampleIndividualOrders = await FirebaseFirestore.instance
-                    .collection('orders')
-                    .where('vendor_id', isEqualTo: 'test_vendor_1')
-                    .get();
-
-                for (var doc in sampleIndividualOrders.docs) {
-                  batch.delete(doc.reference);
-                }
-
-                // Delete sample chat rooms (containing test data)
-                final allChatRooms = await FirebaseFirestore.instance
-                    .collection('chatrooms')
-                    .get();
-
-                for (var doc in allChatRooms.docs) {
-                  final data = doc.data();
-                  final participants = data['participants'] as List<dynamic>? ?? [];
-                  
-                  // Delete if contains sample users
-                  if (participants.contains('customer_sample_1') || 
-                      participants.contains('customer_sample_2') ||
-                      participants.contains('vendor_sample') ||
-                      doc.id.contains('sample_')) {
-                    batch.delete(doc.reference);
-                  }
-                }
-
-                // Delete sample chat messages
-                final allMessages = await FirebaseFirestore.instance
-                    .collection('chatmessages')
-                    .get();
-
-                for (var doc in allMessages.docs) {
-                  final data = doc.data();
-                  final chatRoomId = data['chatRoomId'] as String? ?? '';
-                  
-                  // Delete messages from sample chat rooms
-                  if (chatRoomId.contains('sample_') || chatRoomId.startsWith('chat_sample_')) {
-                    batch.delete(doc.reference);
-                  }
-                }
-
-                await batch.commit();
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('✅ Test data cleared successfully'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-
-                await _loadGroupOrders();
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('❌ Error clearing data: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: Text('Delete', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _createTestUsers() async {
-    Navigator.of(context).pop(); // Close dialog first
-    
-    try {
-      final testUsers = [
-        {
-          'uid': 'test_vendor_1',
-          'name': 'Test Vendor Restaurant',
-          'email': 'vendor@test.com',
-          'role': 'vendor',
-          'phone': '+60123456790',
-          'address': 'Test Restaurant Address, KL',
-        },
-        {
-          'uid': 'customer_sample_1',
-          'name': 'Alice Test Customer',
-          'email': 'alice@test.com',
-          'role': 'customer',
-          'phone': '+60123456791',
-          'address': '123 Test Street, KL',
-        },
-        {
-          'uid': 'customer_sample_2',
-          'name': 'Bob Test Customer',
-          'email': 'bob@test.com',
-          'role': 'customer',
-          'phone': '+60123456792',
-          'address': '456 Another Street, KL',
-        }
-      ];
-
-      final batch = FirebaseFirestore.instance.batch();
-      for (var user in testUsers) {
-        final userRef = FirebaseFirestore.instance.collection('users').doc(user['uid'] as String);
-        batch.set(userRef, {
-          ...user,
-          'created_at': Timestamp.now(),
-          'updated_at': Timestamp.now(),
-        });
-      }
-
-      await batch.commit();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Test users created successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Error creating test users: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
 
   // Build small chat button for bottom right corner
   Widget _buildChatButton() {
@@ -1210,6 +1177,74 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           // Navigate to profile page
           print('Profile tapped');
         },
+        actions: [
+          // Revenue button
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DriverRevenuePage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.account_balance_wallet),
+              tooltip: 'Revenue & Orders',
+              color: Colors.green[600],
+            ),
+          ),
+          // Notification icon
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: InkWell(
+              child: SvgPicture.asset(
+                'assets/icons/notification.svg',
+                width: 24,
+                height: 24,
+              ),
+            ),
+          ),
+          // Online status button for drivers only
+          if (currentUser?.role == 'driver') ...[
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: InkWell(
+                onTap: toggleOnlineStatus,
+                child: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: (isOnline) ? Colors.green : Colors.red,
+                    border: Border.all(
+                      color: (isOnline) ? Colors.green.shade700 : Colors.red.shade700,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          IconButton(
+            icon: CircleAvatar(
+              backgroundImage: currentUser?.profileImage != null
+                  ? NetworkImage(currentUser!.profileImage!)
+                  : const AssetImage('assets/icons/default_avatar.png') as ImageProvider,
+            ),
+            onPressed: () {
+              // Navigate to profile page
+              print('Profile tapped');
+            },
+            tooltip: 'Profile',
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _signOut,
+            tooltip: 'Sign Out',
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -1370,16 +1405,51 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                             ],
                           ),
                         )
-                      : RefreshIndicator(
-                          onRefresh: () async {
-                            await _loadGroupOrders();
-                          },
-                          child: ListView.builder(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(16),
-                            itemCount: groupOrders.length,
-                            itemBuilder: (context, index) {
-                          final order = groupOrders[index];
+                      : Column(
+                          children: [
+                            // Filter dropdown
+                            _buildFilterDropdown(),
+                            // Divider
+                            Divider(height: 1, color: Colors.grey[300]),
+                            // Orders list
+                            Expanded(
+                              child: filteredGroupOrders.isEmpty
+                                  ? RefreshIndicator(
+                                      onRefresh: () async {
+                                        await _loadGroupOrders();
+                                      },
+                                      child: ListView(
+                                        physics: const AlwaysScrollableScrollPhysics(),
+                                        children: [
+                                          const SizedBox(height: 100),
+                                          Center(
+                                            child: Column(
+                                              children: [
+                                                Icon(Icons.filter_list_off, 
+                                                     size: 48, 
+                                                     color: Colors.grey[400]),
+                                                const SizedBox(height: 16),
+                                                Text(
+                                                  'No orders match your filter\nTry changing the filter or pull to refresh',
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : RefreshIndicator(
+                                      onRefresh: () async {
+                                        await _loadGroupOrders();
+                                      },
+                                      child: ListView.builder(
+                                        physics: const AlwaysScrollableScrollPhysics(),
+                                        padding: const EdgeInsets.all(16),
+                                        itemCount: filteredGroupOrders.length,
+                                        itemBuilder: (context, index) {
+                                          final order = filteredGroupOrders[index];
                           final bool isSelected =
                               selectedOrderId == order.id;
                           final bool isAssignedToMe = 
@@ -1670,12 +1740,15 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                             ),
                           );
                         },
-                      ),
+                                      ),
+                                    ),
+                            ),
+                          ],
                         ),
             ),
           ),
-        ],
-      ),
+          ],
+        ),
           // Positioned dev tools button above chat button
           Positioned(
             bottom: 90,

@@ -89,13 +89,15 @@ class OrderService {
 
       print('✅ Order ${order['id']} is available, assigning to driver: $currentUserId');
 
-      // Update with driver assignment
+      // Update with driver assignment and status
       await FirebaseFirestore.instance
           .collection('grouporders')
           .doc(order['id'])
           .update({
         'driver_id': currentUserId,
         'assigned_at': Timestamp.now(),
+        'status': 'assigned',
+        'updated_at': Timestamp.now(),
       });
 
       print('✅ Order ${order['id']} updated with driver assignment');
