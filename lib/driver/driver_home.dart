@@ -10,11 +10,9 @@ import '../services/timer_utils_service.dart';
 import '../services/location_service.dart';
 import '../chat_page.dart';
 import '../chat_room_list_page.dart';
-import 'driver_revenue.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:flutter_svg/svg.dart';
 import 'dart:math' as math;
 import 'dart:async';
 
@@ -1403,74 +1401,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           // Navigate to profile page
           print('Profile tapped');
         },
-        actions: [
-          // Revenue button
-          Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: IconButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const DriverRevenuePage(),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.account_balance_wallet),
-              tooltip: 'Revenue & Orders',
-              color: Colors.green[600],
-            ),
-          ),
-          // Notification icon
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: InkWell(
-              child: SvgPicture.asset(
-                'assets/icons/notification.svg',
-                width: 24,
-                height: 24,
-              ),
-            ),
-          ),
-          // Online status button for drivers only
-          if (currentUser?.role == 'driver') ...[
-            Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: InkWell(
-                onTap: toggleOnlineStatus,
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: (isOnline) ? Colors.green : Colors.red,
-                    border: Border.all(
-                      color: (isOnline) ? Colors.green.shade700 : Colors.red.shade700,
-                      width: 2,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-          IconButton(
-            icon: CircleAvatar(
-              backgroundImage: currentUser?.profileImage != null
-                  ? NetworkImage(currentUser!.profileImage!)
-                  : const AssetImage('assets/icons/default_avatar.png') as ImageProvider,
-            ),
-            onPressed: () {
-              // Navigate to profile page
-              print('Profile tapped');
-            },
-            tooltip: 'Profile',
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _signOut,
-            tooltip: 'Sign Out',
-          ),
-        ],
       ),
       body: Stack(
         children: [

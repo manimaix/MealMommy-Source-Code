@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
+import 'services/notification_service.dart';
 import 'register_page.dart';
 import 'customer/customer_home.dart';
 import 'vendor/homepage.dart';
@@ -30,6 +31,10 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Initialize notification service
+  final notificationService = NotificationService();
+  await notificationService.init();
 
   // Configure Firebase App Check based on platform
   if (kIsWeb) {

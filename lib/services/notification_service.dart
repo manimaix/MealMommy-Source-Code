@@ -1,30 +1,109 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/foundation.dart';
+
+// Top-level function for handling background messages
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (kDebugMode) {
+    print("Handling a background message: ${message.messageId}");
+  }
+}
 
 class NotificationService {
+  static final NotificationService _instance = NotificationService._internal();
+  factory NotificationService() => _instance;
+  NotificationService._internal();
+
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
   Future<void> init() async {
-    // Request permissions (iOS)
-    await _fcm.requestPermission();
+    try {
+      // Request permissions (iOS and web)
+      NotificationSettings settings = await _fcm.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        announcement: false,
+        carPlay: false,
+        criticalAlert: false,
+        provisional: false,
+      );
 
-    // Initialize local notifications
-    const initSettings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      if (kDebugMode) {
+        print('User granted permission: ${settings.authorizationStatus}');
+      }
+
+      // Set background message handler
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+      // Initialize local notifications
+      const initSettings = InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: true,
+          requestBadgePermission: true,
+          requestSoundPermission: true,
+        ),
+      );
+
+      await _localNotifications.initialize(
+        initSettings,
+        onDidReceiveNotificationResponse: _onNotificationTap,
+      );
+
+      // Create notification channel for Android
+      await _createNotificationChannel();
+
+      // Foreground messages
+      FirebaseMessaging.onMessage.listen((message) {
+        if (kDebugMode) {
+          print('Got a message whilst in the foreground!');
+          print('Message data: ${message.data}');
+        }
+        _showLocal(message);
+      });
+
+      // Handle notification tap when app is in background/terminated
+      FirebaseMessaging.onMessageOpenedApp.listen((message) {
+        if (kDebugMode) {
+          print('A new onMessageOpenedApp event was published!');
+        }
+        _handleNotificationTap(message);
+      });
+
+      // Check for initial message (when app is launched from a notification)
+      RemoteMessage? initialMessage = await _fcm.getInitialMessage();
+      if (initialMessage != null) {
+        _handleNotificationTap(initialMessage);
+      }
+
+      // Get FCM token
+      String? token = await _fcm.getToken();
+      if (kDebugMode) {
+        print('FCM Token: $token');
+      }
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error initializing notifications: $e');
+      }
+    }
+  }
+
+  Future<void> _createNotificationChannel() async {
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'mealmommy_channel', // id
+      'MealMommy Notifications', // title
+      description: 'This channel is used for MealMommy notifications.',
+      importance: Importance.max,
     );
-    await _localNotifications.initialize(initSettings);
 
-    // Foreground messages
-    FirebaseMessaging.onMessage.listen((message) {
-      _showLocal(message);
-    });
-
-    // Handle notification tap
-    FirebaseMessaging.onMessageOpenedApp.listen((message) {
-      // TODO: Navigate based on message.data
-    });
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
   }
 
   void _showLocal(RemoteMessage message) {
@@ -32,17 +111,53 @@ class NotificationService {
     if (notification == null) return;
 
     _localNotifications.show(
-      0,
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
       notification.title,
       notification.body,
       const NotificationDetails(
         android: AndroidNotificationDetails(
-          'channel_id',
-          'Notifications',
+          'mealmommy_channel',
+          'MealMommy Notifications',
+          channelDescription: 'This channel is used for MealMommy notifications.',
           importance: Importance.max,
           priority: Priority.high,
+          showWhen: true,
+        ),
+        iOS: DarwinNotificationDetails(
+          sound: 'default.wav',
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
         ),
       ),
+      payload: message.data.toString(),
     );
+  }
+
+  void _onNotificationTap(NotificationResponse response) {
+    if (kDebugMode) {
+      print('Notification tapped: ${response.payload}');
+    }
+    // Handle local notification tap
+  }
+
+  void _handleNotificationTap(RemoteMessage message) {
+    if (kDebugMode) {
+      print('Handling notification tap: ${message.data}');
+    }
+    // Handle notification tap based on message data
+    // You can navigate to specific pages based on message.data
+  }
+
+  Future<String?> getToken() async {
+    return await _fcm.getToken();
+  }
+
+  Future<void> subscribeToTopic(String topic) async {
+    await _fcm.subscribeToTopic(topic);
+  }
+
+  Future<void> unsubscribeFromTopic(String topic) async {
+    await _fcm.unsubscribeFromTopic(topic);
   }
 }
