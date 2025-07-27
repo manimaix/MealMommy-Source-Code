@@ -47,6 +47,11 @@ dependencies:
   http: ^1.4.0
   path: ^1.8.0
   intl: ^0.20.2
+  flutter_map: ^8.1.1
+  latlong2: ^0.9.1
+  geolocator: ^13.0.2
+  firebase_app_check: ^0.3.2+10
+  cached_network_image: ^3.4.1
 
 
 dev_dependencies:

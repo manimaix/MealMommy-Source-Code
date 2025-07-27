@@ -7,7 +7,7 @@ class NotificationPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const CustomAppBar(),
+      appBar: const GlobalAppBar(),
       body: const Center(child: Text("This is the notification page")),
     );
   }

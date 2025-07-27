@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../models/user_model.dart';
-
+import 'user_profile.dart'; 
+import 'customer_orders.dart';
+import 'customer_ordermeal.dart';
 class CustomerHome extends StatefulWidget {
   const CustomerHome({super.key});
 
@@ -28,7 +30,7 @@ class _CustomerHomeState extends State<CustomerHome> {
       });
     } catch (e) {
       setState(() => _isLoading = false);
-      print('Error loading user: $e');
+      debugPrint('Error loading user: $e');
     }
   }
 
@@ -36,7 +38,8 @@ class _CustomerHomeState extends State<CustomerHome> {
     try {
       await AuthService.instance.signOut();
       if (mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+        Navigator.of(context)
+            .pushNamedAndRemoveUntil('/login', (route) => false);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -96,24 +99,31 @@ class _CustomerHomeState extends State<CustomerHome> {
                             children: [
                               Text(
                                 'Welcome, ${_currentUser?.name ?? 'User'}!',
-                                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.bold),
                               ),
                               Text(
                                 _currentUser?.email ?? '',
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Theme.of(context).textTheme.bodySmall?.color,
-                                ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                        color: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.color),
                               ),
                               Container(
                                 margin: const EdgeInsets.only(top: 4),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.orange,
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: Text(
+                                child: const Text(
                                   'CUSTOMER',
                                   style: TextStyle(
                                     color: Colors.white,
@@ -141,9 +151,10 @@ class _CustomerHomeState extends State<CustomerHome> {
             // Quick Actions
             Text(
               'Quick Actions',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             GridView.count(
@@ -159,21 +170,25 @@ class _CustomerHomeState extends State<CustomerHome> {
                   Icons.restaurant_menu,
                   Colors.orange,
                   () {
-                    // TODO: Navigate to menu
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Menu coming soon!')),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => MealBrowsePage(),
+                      ),
                     );
                   },
                 ),
                 _buildActionCard(
                   context,
-                  'My Orders',
+                  'Order History',
                   Icons.shopping_bag,
-                  Colors.blue,
+                  Colors.green,
                   () {
-                    // TODO: Navigate to orders
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Orders coming soon!')),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => OrderHistoryPage(),
+                      ),
                     );
                   },
                 ),
@@ -195,9 +210,11 @@ class _CustomerHomeState extends State<CustomerHome> {
                   Icons.person,
                   Colors.green,
                   () {
-                    // TODO: Navigate to profile
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Profile coming soon!')),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => UserProfilePage(),
+                      ),
                     );
                   },
                 ),
@@ -208,9 +225,10 @@ class _CustomerHomeState extends State<CustomerHome> {
             // Recent Activity (Placeholder)
             Text(
               'Recent Activity',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             Card(
@@ -226,16 +244,18 @@ class _CustomerHomeState extends State<CustomerHome> {
                     const SizedBox(height: 8),
                     Text(
                       'No recent activity',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Colors.grey,
-                      ),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyLarge
+                          ?.copyWith(color: Colors.grey),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Start by browsing our menu!',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey,
-                      ),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: Colors.grey),
                     ),
                   ],
                 ),
@@ -255,6 +275,9 @@ class _CustomerHomeState extends State<CustomerHome> {
     VoidCallback onTap,
   ) {
     return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
@@ -271,9 +294,10 @@ class _CustomerHomeState extends State<CustomerHome> {
               const SizedBox(height: 8),
               Text(
                 title,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyLarge
+                    ?.copyWith(fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center,
               ),
             ],

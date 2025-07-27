@@ -125,7 +125,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const CustomAppBar(),
+      appBar: const GlobalAppBar(),
       body: _isLoading
         ? const Center(child: CircularProgressIndicator())
         : Padding(

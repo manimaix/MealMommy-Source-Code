@@ -30,7 +30,7 @@ class _FoodListPageState extends State<FoodListPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const CustomAppBar(),
+      appBar: const GlobalAppBar(),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

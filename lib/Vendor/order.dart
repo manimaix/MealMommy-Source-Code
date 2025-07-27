@@ -57,7 +57,7 @@ class _OrderPageState extends State<OrderPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const CustomAppBar(),
+      appBar: const GlobalAppBar(),
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _fetchPendingOrders(),
         builder: (context, snapshot) {

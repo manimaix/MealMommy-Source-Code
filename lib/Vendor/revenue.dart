@@ -64,7 +64,7 @@ class _RevenuePageState extends State<RevenuePage> {
         NumberFormat.currency(locale: 'en_MY', symbol: 'RM ');
 
     return Scaffold(
-      appBar: const CustomAppBar(),
+      appBar: const GlobalAppBar(),
       body: _loading
     ? const Center(child: CircularProgressIndicator())
     : SingleChildScrollView(

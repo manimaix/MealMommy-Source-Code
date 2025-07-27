@@ -155,7 +155,7 @@ class _CertificatePageState extends State<CertificatePage> {
     }
 
     return Scaffold(
-      appBar: const CustomAppBar(),
+      appBar: const GlobalAppBar(),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
