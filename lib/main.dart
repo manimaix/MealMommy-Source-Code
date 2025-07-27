@@ -8,9 +8,19 @@ import 'vendor/homepage.dart';
 import 'driver/driver_home.dart';
 import 'notification_page.dart';
 import 'vendor/menu.dart';
+import 'vendor/addmenu.dart';
 import 'vendor/foodlist.dart';
-import 'vendor/review.dart';
+import 'vendor/fooddetail.dart';
 import 'Vendor/addfood.dart';
+import 'vendor/revenue.dart';
+import 'vendor/order.dart';
+import 'vendor/orderdetail.dart';
+import 'vendor/editmenu.dart';
+import 'vendor/editfood.dart';
+import 'vendor/foodsafety.dart';
+import 'models/meal_model.dart';
+import 'vendor/certificate.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,10 +50,24 @@ class MyApp extends StatelessWidget {
         '/vendor': (context) => const HomePage(),
         '/driver': (context) => const DriverHome(),
         '/notification': (context) => const NotificationPage(),
-        '/menu': (context) => const MenuPage(),
+        '/menu': (context) => const MenuListPage(),
+        '/addmenu': (context) => const AddMenuPage(),
         '/foodList': (context) => const FoodListPage(),
-        '/review': (context) => const ReviewPage(),
+        '/fooddetail': (context) => FoodDetailPage(
+          meal: ModalRoute.of(context)!.settings.arguments as Meal,
+        ),
         '/addfood': (context) => const AddFoodPage(),
+        '/revenue': (context) => const RevenuePage(),
+        '/order': (context) => const OrderPage(),
+        '/orderdetail': (context) => const OrderDetailPage(),
+        '/editmenu': (context) => EditMenuPage(
+          meal: ModalRoute.of(context)!.settings.arguments as Meal,
+        ),
+        '/foodsafety': (context) => const FoodSafetyPage(),
+        '/cert': (context) => const CertificatePage(),
+        '/editfood': (context) => EditFoodPage(
+          meal: ModalRoute.of(context)!.settings.arguments as Meal,
+        ),
       },
     );
   }

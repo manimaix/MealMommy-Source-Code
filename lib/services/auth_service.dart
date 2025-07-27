@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../models/user_model.dart';
 
 class AuthService {
@@ -50,7 +51,17 @@ class AuthService {
         password: password,
       );
 
-      if (result.user == null) return null;
+      final user = result.user;
+      if (user == null) return null;
+
+      // Get FCM token and save after sign-in
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+         print('FCM Token for this device: $token');
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'fcm_token': token,
+        }, SetOptions(merge: true));
+      }
 
       // Get user data from Firestore
       AppUser? userData = await _getUserData(result.user!.uid);

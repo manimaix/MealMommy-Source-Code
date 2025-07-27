@@ -1,46 +1,31 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-import 'package:permission_handler/permission_handler.dart';
-import '../services/upload.dart'; 
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import '../models/meal_model.dart';
 
-
-Future<void> requestPermissions() async {
-  if (await Permission.storage.request().isDenied) {
-    // Handle permission denied
-    print("Storage permission denied");
-  }
-
-  if (await Permission.photos.request().isDenied) {
-    // For Android 13+
-    print("Photos permission denied");
-  }
-}
-
-class AddFoodPage extends StatefulWidget {
-  const AddFoodPage({super.key});
+class EditFoodPage extends StatefulWidget {
+  final Meal meal;
+  const EditFoodPage({super.key, required this.meal});
 
   @override
-  State<AddFoodPage> createState() => _AddFoodPageState();
+  State<EditFoodPage> createState() => _EditFoodPageState();
 }
 
-class _AddFoodPageState extends State<AddFoodPage> {
-  int _completedStep = -1;
-  int _currentStep = 0;
-  File? _pickedImage;
-  final picker = ImagePicker();
+class _EditFoodPageState extends State<EditFoodPage> {
   final _formKey = GlobalKey<FormState>();
-  final nameController = TextEditingController();
-  final descriptionController = TextEditingController();
-  final quantityController = TextEditingController();
-  final priceController = TextEditingController();
-  final imageUrlController = TextEditingController();
-  final allergensController = TextEditingController();
+  int _currentStep = 0;
+  int _completedStep = -1;
 
-  bool isOvercooked = false;
-  bool status = false;
+  late TextEditingController nameController;
+  late TextEditingController descriptionController;
+  late TextEditingController quantityController;
+  late TextEditingController priceController;
+  late TextEditingController allergensController;
+
+  late bool isOvercooked;
+  late bool status;
+  File? _pickedImage;
 
   List<String> dietaryTags = [
     'Halal',
@@ -63,68 +48,51 @@ class _AddFoodPageState extends State<AddFoodPage> {
     'Sesame',
     'Mustard',
   ];
-
   List<String> selectedTags = [];
-  
-  Future<void> _submitMeal() async {
-  if (_formKey.currentState!.validate()) {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
 
-    String imageUrl = ''; 
+  @override
+  void initState() {
+    super.initState();
+    nameController = TextEditingController(text: widget.meal.name);
+    descriptionController = TextEditingController(text: widget.meal.description);
+    quantityController = TextEditingController(text: widget.meal.quantityAvailable.toString());
+    priceController = TextEditingController(text: widget.meal.price.toString());
+    allergensController = TextEditingController(text: widget.meal.allergens);
+    selectedTags = widget.meal.allergens.split(', ').toList();
+    isOvercooked = widget.meal.isOvercooked;
+    status = widget.meal.status;
+  }
 
-    if (_pickedImage != null) {
-      final uploadedUrl = await uploadToFirebaseStorage(_pickedImage!);
-      if (uploadedUrl != null) {
-        imageUrl = uploadedUrl;
-        imageUrlController.text = imageUrl;
-        print("Meal saved successfully!");
-      }
-    }
+  Future<void> _updateFood() async {
+    if (_formKey.currentState!.validate()) {
+      final mealId = widget.meal.mealId;
 
-    // Use default image URL if none is picked
-    if (imageUrl.isEmpty) {
-      imageUrl = 'https://firebasestorage.googleapis.com/v0/b/mealmommyapplication.firebasestorage.app/o/meal_images%2F1753518287309.jpg?alt=media&token=d6083eb9-aa7e-454a-a992-321c0801d82a';
-      imageUrlController.text = imageUrl;
-    }
-
-    final newMeal = {
-      'name': nameController.text,
-      'description': descriptionController.text,
-      'price': double.tryParse(priceController.text) ?? 0.0,
-      'quantity_available': int.tryParse(quantityController.text) ?? 0,
-      'image_URL': imageUrl,
-      'allergens': allergensController.text,
-      'is_overcooked': isOvercooked,
-      'status': status,
-      'vendor_id': user.uid,
-      'date_created': Timestamp.now(),
-    };
+      final updatedData = {
+        'name': nameController.text.trim(),
+        'description': descriptionController.text.trim(),
+        'quantity_available': int.tryParse(quantityController.text.trim()) ?? 0,
+        'price': double.tryParse(priceController.text.trim()) ?? 0.0,
+        'is_overcooked': isOvercooked,
+        'status': status,
+        'allergens': selectedTags.join(', ')
+      };
 
     if (status) {
-      newMeal['expired_date'] = Timestamp.now();
+      updatedData['expired_date'] = Timestamp.now();
     }
     
-    final docRef = await FirebaseFirestore.instance.collection('meals').add(newMeal);
-
-    await docRef.update({'meal_id': docRef.id});
-
-    Navigator.pop(context); // Back to list
+      await FirebaseFirestore.instance.collection('meals').doc(mealId).update(updatedData);
+      Navigator.pop(context, true);
+    }
   }
-}
 
-
-@override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Add New Meal"),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text("Edit Food")),
       body: Form(
         key: _formKey,
         child: Stepper(
-          type: StepperType.vertical,
           currentStep: _currentStep,
           onStepContinue: () {
             if (_currentStep < 2) {
@@ -133,24 +101,20 @@ class _AddFoodPageState extends State<AddFoodPage> {
                 _currentStep++;
               });
             } else {
-                _submitMeal();
+              _updateFood();
             }
           },
           onStepCancel: () {
             if (_currentStep > 0) {
-              setState(() {
-                _currentStep--;
-              });
+              setState(() => _currentStep--);
             }
           },
-
-          controlsBuilder: (BuildContext context, ControlsDetails details) {
+          controlsBuilder: (context, details) {
             final isLastStep = _currentStep == 2;
-
-          return Padding(
+            return Padding(
               padding: const EdgeInsets.only(top: 16.0),
             child: Row(
-              children: <Widget>[
+              children: [
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -159,7 +123,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                     ),
                   ),
                   onPressed: details.onStepContinue,
-                  child: Text(isLastStep ? 'Submit' : 'Continue'),
+                  child: Text(isLastStep ? 'Update' : 'Next'),
                 ),
                 const SizedBox(width: 8),
                 if (_currentStep > 0)
@@ -175,25 +139,23 @@ class _AddFoodPageState extends State<AddFoodPage> {
                   ),
               ],
             ),
-          );
-          },
+            );
 
+
+          },
           steps: [
             Step(
-              title: const Text('Meal Information'),
+              title: const Text('Meal Info'),
               content: Column(
                 children: [
-                  GestureDetector( // Image Picker
-                      onTap: () async { 
-                        final ImagePicker picker = ImagePicker();
-                        final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-                        if (pickedFile != null) {
-                          setState(() {
-                            _pickedImage = File(pickedFile.path);
-                          });
-                        }
-                      },
+                  GestureDetector(
+                    onTap: () async {
+                      final picker = ImagePicker();
+                      final picked = await picker.pickImage(source: ImageSource.gallery);
+                      if (picked != null) {
+                        setState(() => _pickedImage = File(picked.path));
+                      }
+                    },
                     child: Center(
                       child: Container(
                         width: 150,
@@ -203,20 +165,14 @@ class _AddFoodPageState extends State<AddFoodPage> {
                           color: Colors.grey[300],
                         ),
                         child: _pickedImage != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.file(
-                                  _pickedImage!,
-                                  width: 150,
-                                  height: 150,
-                                  fit: BoxFit.cover,
-                                ),
-                              )
-                            : const Icon(Icons.image, size: 50),
+                            ? Image.file(_pickedImage!, fit: BoxFit.cover)
+                            : Image.network(widget.meal.imageUrl, fit: BoxFit.cover),
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
+
+                  // Meal Name
                   const Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -225,8 +181,9 @@ class _AddFoodPageState extends State<AddFoodPage> {
                       ),
                     ),
                   const SizedBox(height: 8),
-                  TextFormField(controller: nameController, 
-                  decoration: InputDecoration(
+                  TextFormField(
+                    controller: nameController,
+                    decoration: InputDecoration(
                     hintText: 'Enter meal name',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12.0), // Rounded corners
@@ -240,10 +197,11 @@ class _AddFoodPageState extends State<AddFoodPage> {
                       borderSide: const BorderSide(color: Colors.blue, width: 2),
                     ),
                   ),
-                    validator: (value) =>
-                        value == null || value.trim().isEmpty ? 'Required' : null,
+                    validator: (val) => val == null || val.isEmpty ? 'Required' : null,
                   ),
                   const SizedBox(height: 8),
+
+                  // Description
                   const Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -252,9 +210,9 @@ class _AddFoodPageState extends State<AddFoodPage> {
                       ),
                     ),
                   const SizedBox(height: 8),
-                  TextFormField(controller: descriptionController, 
-                  decoration: InputDecoration(
-                    hintText: 'Enter meal description',
+                  TextFormField(
+                    controller: descriptionController,
+                    decoration: InputDecoration(
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12.0), // Rounded corners
                     ),
@@ -267,19 +225,21 @@ class _AddFoodPageState extends State<AddFoodPage> {
                       borderSide: const BorderSide(color: Colors.blue, width: 2),
                     ),
                   ),
-                    validator: (value) =>
-                        value == null || value.trim().isEmpty ? 'Required' : null,
+                    validator: (val) => val == null || val.isEmpty ? 'Required' : null,
                   ),
                 ],
               ),
               isActive: _currentStep >= 0,
               state: _completedStep >= 0 ? StepState.complete : StepState.indexed,
             ),
+
             Step(
-              title: const Text('Dietary and Allergen'),
+              title: const Text('Dietary & Allergen'),
               content: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+
+                  // Dietary Tags
                   const Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -304,6 +264,8 @@ class _AddFoodPageState extends State<AddFoodPage> {
                     }).toList(),
                   ),
                   const SizedBox(height: 16),
+
+                  // Allergen Tags
                   const Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -320,11 +282,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                         selected: selectedTags.contains(tag),
                         onSelected: (val) {
                           setState(() {
-                            if (val) {
-                              selectedTags.add(tag);
-                            } else {
-                              selectedTags.remove(tag);
-                            }
+                            val ? selectedTags.add(tag) : selectedTags.remove(tag);
                             allergensController.text = selectedTags.join(', ');
                           });
                         },
@@ -363,8 +321,9 @@ class _AddFoodPageState extends State<AddFoodPage> {
               isActive: _currentStep >= 1,
               state: _completedStep >= 1 ? StepState.complete : StepState.indexed,
             ),
+
             Step(
-              title: const Text('Price and Setup Menu'),
+              title: const Text('Price & Menu Setup'),
               content: Column(
                 children: [
                   const Align(
@@ -375,7 +334,8 @@ class _AddFoodPageState extends State<AddFoodPage> {
                       ),
                     ),
                   const SizedBox(height: 8),
-                    TextFormField(
+                  // Quantity
+                  TextFormField(
                       controller: quantityController,
                       decoration: InputDecoration(
                         hintText: 'Enter food potions',
@@ -410,8 +370,9 @@ class _AddFoodPageState extends State<AddFoodPage> {
                         return null;
                       },
                     ),
-
                   const SizedBox(height: 16),
+
+                  // Price
                   const Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -419,7 +380,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                       ),
                     ),
-                  const SizedBox(height: 8),  
+                  const SizedBox(height: 8),
                   TextFormField(
                     controller: priceController,
                     decoration: InputDecoration(
@@ -444,6 +405,8 @@ class _AddFoodPageState extends State<AddFoodPage> {
                       return null;
                     },
                   ),
+
+                  // Is Overcooked
                   SwitchListTile(
                     title: const Text('Is Overcooked'),
                     value: isOvercooked,
@@ -453,6 +416,8 @@ class _AddFoodPageState extends State<AddFoodPage> {
                       });
                     },
                   ),
+
+                  // Status
                   SwitchListTile(
                     title: const Text('Status (Available)'),
                     value: status,
@@ -471,12 +436,12 @@ class _AddFoodPageState extends State<AddFoodPage> {
                   ),
                 ],
               ),
-              isActive: _currentStep > 2,
-              state: _completedStep > 2 ? StepState.complete : StepState.indexed,
+              isActive: _currentStep >= 2,
+              state: _completedStep >= 2 ? StepState.complete : StepState.indexed,
             ),
           ],
         ),
       ),
     );
-  }  
+  }
 }

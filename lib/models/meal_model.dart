@@ -12,6 +12,7 @@ class Meal {
   final bool isOvercooked;
   final bool status;
   final Timestamp dateCreated;
+  final Timestamp expiringTime;
 
   Meal({
     required this.mealId,
@@ -25,12 +26,13 @@ class Meal {
     required this.isOvercooked,
     required this.status,
     required this.dateCreated,
+    required this.expiringTime,
   });
 
   /// Factory constructor to build a Meal object from Firestore data
   factory Meal.fromFirestore(Map<String, dynamic> data, String id) {
     return Meal(
-      mealId: id,
+      mealId: data['meal_id'] ?? id,
       vendorId: data['vendor_id'] ?? '',
       name: data['name'] ?? '',
       description: data['description'] ?? '',
@@ -41,6 +43,7 @@ class Meal {
       isOvercooked: data['is_overcooked'] ?? false,
       status: data['status'] ?? false,
       dateCreated: data['date_created'] ?? Timestamp.now(),
+      expiringTime: data['expired_date'] ?? Timestamp.now(),
     );
   }
 
@@ -57,6 +60,7 @@ class Meal {
       'is_overcooked': isOvercooked,
       'status': status,
       'date_created': dateCreated,
+      'expired_date': expiringTime,
     };
   }
 }

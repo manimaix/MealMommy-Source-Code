@@ -43,8 +43,10 @@ dependencies:
   flutter_local_notifications: ^19.3.1
   firebase_storage: ^12.4.10
   permission_handler: ^12.0.1
+  googleapis_auth: ^2.0.0
   http: ^1.4.0
   path: ^1.8.0
+  intl: ^0.20.2
 
 
 dev_dependencies:
@@ -74,6 +76,7 @@ flutter:
     - assets/icons/Logo.png
     - assets/icons/arrow-left.svg
     - assets/icons/notification.svg
+    - assets/icons/default_food.jpg
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
