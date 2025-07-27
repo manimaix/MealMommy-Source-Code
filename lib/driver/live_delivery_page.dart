@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import '../models/models.dart';
 import '../services/chat_service.dart';
+import '../services/route_service.dart';
 import '../chat_page.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -285,7 +286,7 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
     // Create realistic curve between points
     final double latDiff = end.latitude - start.latitude;
     final double lngDiff = end.longitude - start.longitude;
-    final double distance = _calculateDistance(start, end);
+    final double distance = RouteService.calculateDistance(start, end);
 
     // Number of intermediate points based on distance
     final int numPoints = math.max(3, (distance * 5).round());
@@ -313,21 +314,7 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
     });
   }
 
-  double _calculateDistance(LatLng point1, LatLng point2) {
-    const double earthRadius = 6371; // Earth radius in kilometers
-    
-    final double lat1Rad = point1.latitude * (math.pi / 180);
-    final double lat2Rad = point2.latitude * (math.pi / 180);
-    final double deltaLatRad = (point2.latitude - point1.latitude) * (math.pi / 180);
-    final double deltaLngRad = (point2.longitude - point1.longitude) * (math.pi / 180);
 
-    final double a = math.sin(deltaLatRad / 2) * math.sin(deltaLatRad / 2) +
-        math.cos(lat1Rad) * math.cos(lat2Rad) *
-        math.sin(deltaLngRad / 2) * math.sin(deltaLngRad / 2);
-    final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-
-    return earthRadius * c;
-  }
 
   List<Polyline> _createCurrentStepRoute() {
     if (currentRoutePoints.isEmpty) return [];

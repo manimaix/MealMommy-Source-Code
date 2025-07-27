@@ -94,4 +94,89 @@ class TimerUtilsService {
       return 'Invalid date';
     }
   }
+
+  /// Check if an order is ready for delivery (within 30 minutes of scheduled time)
+  static bool isOrderReadyForDelivery(dynamic scheduledTime) {
+    if (scheduledTime == null) return true; // If no scheduled time, allow immediately
+    
+    final now = DateTime.now();
+    late DateTime scheduledDateTime;
+    
+    if (scheduledTime is Timestamp) {
+      scheduledDateTime = scheduledTime.toDate();
+    } else if (scheduledTime is DateTime) {
+      scheduledDateTime = scheduledTime;
+    } else {
+      return true; // Invalid type, allow delivery
+    }
+    
+    final timeDifference = scheduledDateTime.difference(now);
+    
+    // Allow delivery if within 30 minutes of scheduled time
+    return timeDifference.inMinutes <= 30;
+  }
+
+  /// Get time remaining until order is ready for delivery
+  static String getTimeUntilReady(dynamic scheduledTime) {
+    if (scheduledTime == null) return '';
+    
+    final now = DateTime.now();
+    late DateTime scheduledDateTime;
+    
+    if (scheduledTime is Timestamp) {
+      scheduledDateTime = scheduledTime.toDate();
+    } else if (scheduledTime is DateTime) {
+      scheduledDateTime = scheduledTime;
+    } else {
+      return '';
+    }
+    
+    final timeDifference = scheduledDateTime.difference(now);
+    
+    if (timeDifference.inMinutes <= 30) return 'Ready for delivery';
+    
+    final hours = timeDifference.inHours;
+    final minutes = timeDifference.inMinutes % 60;
+    
+    if (hours > 0) {
+      return 'Ready in ${hours}h ${minutes}m';
+    } else {
+      return 'Ready in ${minutes}m';
+    }
+  }
+
+  /// Check if an order is overdue
+  static bool isOrderOverdue(dynamic scheduledTime) {
+    if (scheduledTime == null) return false;
+    
+    late DateTime scheduledDateTime;
+    
+    if (scheduledTime is Timestamp) {
+      scheduledDateTime = scheduledTime.toDate();
+    } else if (scheduledTime is DateTime) {
+      scheduledDateTime = scheduledTime;
+    } else {
+      return false;
+    }
+    
+    return DateTime.now().isAfter(scheduledDateTime);
+  }
+
+  /// Get time remaining until scheduled time
+  static Duration? getTimeRemaining(dynamic scheduledTime) {
+    if (scheduledTime == null) return null;
+    
+    late DateTime scheduledDateTime;
+    
+    if (scheduledTime is Timestamp) {
+      scheduledDateTime = scheduledTime.toDate();
+    } else if (scheduledTime is DateTime) {
+      scheduledDateTime = scheduledTime;
+    } else {
+      return null;
+    }
+    
+    final difference = scheduledDateTime.difference(DateTime.now());
+    return difference.isNegative ? null : difference;
+  }
 }

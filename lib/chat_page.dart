@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'services/chat_service.dart';
+import 'services/timer_utils_service.dart';
 
 class ChatPage extends StatefulWidget {
   final String? chatRoomId;
@@ -52,11 +54,13 @@ class _ChatPageState extends State<ChatPage> {
       // Existing chatroom
       currentChatRoomId = widget.chatRoomId;
     } else if (widget.groupOrderId != null && widget.initialParticipants != null) {
-      // Create new chatroom for group order
-      currentChatRoomId = await _createChatRoom(
-        widget.groupOrderId!,
-        widget.initialParticipants!,
-      );
+      // Check if chat room already exists for this group order
+      currentChatRoomId = await ChatService.getChatRoomForOrder(widget.groupOrderId!);
+      
+      if (currentChatRoomId == null) {
+        // Create new chatroom for group order using ChatService
+        currentChatRoomId = await _createChatRoomWithService();
+      }
     }
     
     setState(() {
@@ -64,53 +68,33 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-  Future<String> _createChatRoom(String groupOrderId, List<String> participants) async {
+  Future<String?> _createChatRoomWithService() async {
+    if (widget.groupOrderId == null || widget.initialParticipants == null) {
+      return null;
+    }
+
     try {
-      // Use group order ID as chat room ID for consistency
-      final chatRoomId = 'chat_$groupOrderId';
+      // Parse participants to identify driver, vendor, and customers
+      final participants = widget.initialParticipants!;
       
-      // Add current user to participants if not already included
-      final allParticipants = List<String>.from(participants);
-      if (currentUserId != null && !allParticipants.contains(currentUserId!)) {
-        allParticipants.add(currentUserId!);
-      }
-
-      final chatRoomData = {
-        'chatRoomId': chatRoomId,
-        'participants': allParticipants,
-        'lastMessage': 'Chat started for group order',
-        'lastMessageTime': Timestamp.now(),
-        'createdAt': Timestamp.now(),
-        'isGroup': true,
-        'groupOrderId': groupOrderId,
-        'status': 'active', // Will be set to 'completed' after 24 hours
-      };
-
-      await _firestore.collection('chatroom').doc(chatRoomId).set(chatRoomData);
+      // For simplicity, assume first participant is driver, second is vendor (if exists), rest are customers
+      // This should be improved with proper role identification
+      final driverId = currentUserId ?? '';
+      final vendorId = participants.isNotEmpty ? participants[0] : '';
+      final customerIds = participants.length > 1 
+          ? participants.sublist(1).cast<String>() 
+          : <String>[];
       
-      // Send initial system message
-      await _sendSystemMessage(chatRoomId, 'Group chat created for delivery order $groupOrderId');
+      final chatRoomId = await ChatService.createOrderChatRoom(
+        groupOrderId: widget.groupOrderId!,
+        driverId: driverId,
+        vendorId: vendorId,
+        customerIds: customerIds,
+      );
       
       return chatRoomId;
     } catch (e) {
-      print('Error creating chat room: $e');
       throw e;
-    }
-  }
-
-  Future<void> _sendSystemMessage(String chatRoomId, String message) async {
-    try {
-      await _firestore.collection('chatmessages').add({
-        'chatRoomId': chatRoomId,
-        'senderId': 'system',
-        'senderName': 'System',
-        'text': message,
-        'mediaUrl': null,
-        'type': 'system',
-        'sentAt': Timestamp.now(),
-      });
-    } catch (e) {
-      print('Error sending system message: $e');
     }
   }
 
@@ -135,7 +119,7 @@ class _ChatPageState extends State<ChatPage> {
           senderName = userDoc.data()!['name'];
         }
       } catch (e) {
-        print('Could not fetch user name: $e');
+        // Could not fetch user name - continue with default
       }
 
       // Add message to chatmessages collection
@@ -158,7 +142,6 @@ class _ChatPageState extends State<ChatPage> {
       // Scroll to bottom
       _scrollToBottom();
     } catch (e) {
-      print('Error sending message: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to send message: $e'),
@@ -203,7 +186,7 @@ class _ChatPageState extends State<ChatPage> {
           senderName = userDoc.data()!['name'];
         }
       } catch (e) {
-        print('Could not fetch user name: $e');
+        // Could not fetch user name - continue with default
       }
 
       // Add message to chatmessages collection
@@ -225,7 +208,6 @@ class _ChatPageState extends State<ChatPage> {
 
       _scrollToBottom();
     } catch (e) {
-      print('Error sending image: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to send image: $e'),
@@ -465,7 +447,7 @@ class _ChatPageState extends State<ChatPage> {
                   
                   const SizedBox(height: 4),
                   Text(
-                    _formatTimestamp(sentAt),
+                    TimerUtilsService.formatTimestamp(sentAt),
                     style: TextStyle(
                       fontSize: 10,
                       color: isMyMessage ? Colors.white70 : Colors.grey[600],
@@ -558,24 +540,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  String _formatTimestamp(Timestamp? timestamp) {
-    if (timestamp == null) return '';
-    
-    final DateTime dateTime = timestamp.toDate();
-    final DateTime now = DateTime.now();
-    final Duration difference = now.difference(dateTime);
-    
-    if (difference.inDays > 0) {
-      return '${dateTime.day}/${dateTime.month} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else if (difference.inHours > 0) {
-      return '${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes}m ago';
-    } else {
-      return 'Now';
-    }
-  }
-
   void _showChatInfo() {
     showDialog(
       context: context,
@@ -598,7 +562,7 @@ class _ChatPageState extends State<ChatPage> {
               children: [
                 Text('Participants: ${participants.length}'),
                 const SizedBox(height: 8),
-                Text('Created: ${_formatTimestamp(createdAt)}'),
+                Text('Created: ${TimerUtilsService.formatTimestamp(createdAt)}'),
                 const SizedBox(height: 8),
                 Text('Group Order: ${widget.groupOrderId ?? 'N/A'}'),
                 const SizedBox(height: 8),
@@ -632,11 +596,8 @@ class ChatRoomsListPage extends StatelessWidget {
         backgroundColor: Colors.green[600],
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('chatroom')
-            .where('participants', arrayContains: currentUserId)
-            .snapshots(),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: ChatService.getUserChatRooms(currentUserId),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
@@ -646,33 +607,9 @@ class ChatRoomsListPage extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final chatRoomDocs = snapshot.data?.docs ?? [];
-          
-          // Filter and sort manually to avoid index requirement
-          final activeChatRooms = chatRoomDocs
-              .where((doc) {
-                final data = doc.data() as Map<String, dynamic>;
-                return data['status'] == 'active';
-              })
-              .map((doc) => {
-                'id': doc.id,
-                ...doc.data() as Map<String, dynamic>
-              })
-              .toList();
-          
-          // Sort by lastMessageTime descending
-          activeChatRooms.sort((a, b) {
-            final aTime = a['lastMessageTime'] as Timestamp?;
-            final bTime = b['lastMessageTime'] as Timestamp?;
-            
-            if (aTime == null && bTime == null) return 0;
-            if (aTime == null) return 1;
-            if (bTime == null) return -1;
-            
-            return bTime.compareTo(aTime);
-          });
+          final chatRooms = snapshot.data ?? [];
 
-          if (activeChatRooms.isEmpty) {
+          if (chatRooms.isEmpty) {
             return const Center(
               child: Text(
                 'No active chats.\nChats are created automatically for your deliveries.',
@@ -683,9 +620,9 @@ class ChatRoomsListPage extends StatelessWidget {
           }
 
           return ListView.builder(
-            itemCount: activeChatRooms.length,
+            itemCount: chatRooms.length,
             itemBuilder: (context, index) {
-              final chatRoomData = activeChatRooms[index];
+              final chatRoomData = chatRooms[index];
               
               return _buildChatRoomTile(context, chatRoomData);
             },
@@ -698,7 +635,7 @@ class ChatRoomsListPage extends StatelessWidget {
   Widget _buildChatRoomTile(BuildContext context, Map<String, dynamic> chatRoomData) {
     final lastMessage = chatRoomData['lastMessage'] ?? '';
     final lastMessageTime = chatRoomData['lastMessageTime'] as Timestamp?;
-    final groupOrderId = chatRoomData['groupOrderId'] ?? '';
+    final groupOrderId = chatRoomData['group_id'] ?? chatRoomData['groupOrderId'] ?? '';
     final participants = chatRoomData['participants'] as List<dynamic>? ?? [];
     
     return ListTile(
@@ -730,7 +667,7 @@ class ChatRoomsListPage extends StatelessWidget {
       ),
       trailing: lastMessageTime != null
           ? Text(
-              _formatTimestamp(lastMessageTime),
+              TimerUtilsService.formatTimestamp(lastMessageTime),
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             )
           : null,
@@ -747,21 +684,5 @@ class ChatRoomsListPage extends StatelessWidget {
         );
       },
     );
-  }
-
-  String _formatTimestamp(Timestamp timestamp) {
-    final DateTime dateTime = timestamp.toDate();
-    final DateTime now = DateTime.now();
-    final Duration difference = now.difference(dateTime);
-    
-    if (difference.inDays > 0) {
-      return '${difference.inDays}d ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes}m ago';
-    } else {
-      return 'Now';
-    }
   }
 }

@@ -30,12 +30,19 @@ class OrderService {
         if (status == 'completed') continue;
         
         // Filter out orders assigned to OTHER drivers
-        if (driverId != null && driverId != '' && driverId != currentUserId) continue;
+        if (driverId != null && driverId != '' && driverId != currentUserId) {
+          print('Skipping order $orderId: assigned to different driver ($driverId)');
+          continue;
+        }
         
         // Show orders with no driver or assigned to current driver
         if (driverId == null || driverId == '' || driverId == currentUserId) {
+          print('Checking distance for order $orderId (status: $status, driver: $driverId)');
           if (await _isOrderWithinDistance(orderId, deliveryPreferences, driverLocation)) {
+            print('Including order $orderId in results');
             filteredOrders.add({'id': orderId, ...data});
+          } else {
+            print('Excluding order $orderId: outside distance range');
           }
         }
       }
@@ -185,6 +192,10 @@ class OrderService {
       
       final maxDistanceKm = deliveryPreferences.maxDistance.toDouble();
       
+      print('Checking distance for group $groupId:');
+      print('Driver location: ${driverLocation.latitude.toStringAsFixed(4)}, ${driverLocation.longitude.toStringAsFixed(4)}');
+      print('Max distance: ${maxDistanceKm}km');
+      
       for (var orderDoc in ordersSnapshot.docs) {
         final orderData = orderDoc.data();
         final lat = double.tryParse(orderData['delivery_latitude']?.toString() ?? '');
@@ -192,12 +203,22 @@ class OrderService {
         
         if (lat != null && lng != null) {
           final deliveryLocation = LatLng(lat, lng);
-          final distance = RouteService.calculateDistance(driverLocation, deliveryLocation);
+          final distanceKm = RouteService.calculateDistance(driverLocation, deliveryLocation);
           
-          if (distance <= maxDistanceKm) return true;
+          print('  Order ${orderDoc.id}: Delivery(${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}) = ${distanceKm.toStringAsFixed(2)}km');
+          
+          if (distanceKm <= maxDistanceKm) {
+            print('  ✓ Within range, including group');
+            return true;
+          } else {
+            print('  ✗ Outside range (${distanceKm.toStringAsFixed(2)}km > ${maxDistanceKm}km)');
+          }
+        } else {
+          print('  Order ${orderDoc.id}: Invalid coordinates (lat: $lat, lng: $lng)');
         }
       }
       
+      print('  No orders within range, excluding group');
       return false;
     } catch (e) {
       print('Error checking order distance: $e');

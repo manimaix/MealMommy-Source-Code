@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:intl/intl.dart';
 import '../models/models.dart';
+import '../services/revenue_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class DriverRevenuePage extends StatefulWidget {
@@ -82,12 +83,28 @@ class _DriverRevenuePageState extends State<DriverRevenuePage>
       // Load group orders first, then individual orders
       await _loadAllGroupOrders();
       await _loadAllOrders();
-      _calculateRevenue();
+      
+      // Calculate revenue using service
+      final revenueData = RevenueService.calculateRevenue(
+        allGroupOrders: allGroupOrders,
+        allOrders: allOrders,
+      );
+      
+      // Update state with calculated values
+      setState(() {
+        todayRevenue = revenueData['todayRevenue'] ?? 0.0;
+        monthRevenue = revenueData['monthRevenue'] ?? 0.0;
+        yearRevenue = revenueData['yearRevenue'] ?? 0.0;
+        totalRevenue = revenueData['totalRevenue'] ?? 0.0;
+        todayOrders = revenueData['todayOrders'] ?? 0;
+        monthOrders = revenueData['monthOrders'] ?? 0;
+        yearOrders = revenueData['yearOrders'] ?? 0;
+        totalOrders = revenueData['totalOrders'] ?? 0;
+      });
       
       // Start fade animation
       _fadeController.forward();
     } catch (e) {
-      print('Error loading driver data: $e');
       _showErrorSnackBar('Error loading data: $e');
     } finally {
       setState(() {
@@ -104,45 +121,26 @@ class _DriverRevenuePageState extends State<DriverRevenuePage>
       // We'll filter by completion status during revenue calculation
       allOrders = [];
       
-      print('🔍 Loading orders for ${allGroupOrders.length} group orders');
-      
       for (var groupOrder in allGroupOrders) {
-        print('📦 Loading orders for group order ${groupOrder.id} with status: ${groupOrder.status}');
-        
         try {
-          print('🔍 Querying orders for group_id: ${groupOrder.id}');
           final ordersSnapshot = await FirebaseFirestore.instance
               .collection('orders')
               .where('group_id', isEqualTo: groupOrder.id)
               .get();
 
-          print('📄 Found ${ordersSnapshot.docs.length} orders for group ${groupOrder.id}');
-          
           final groupOrdersList = ordersSnapshot.docs
               .map((doc) {
-                print('📋 Order data: ${doc.data()}');
                 return Order.fromFirestore(doc.data(), doc.id);
               })
               .toList();
               
           allOrders.addAll(groupOrdersList);
-          print('➕ Added ${groupOrdersList.length} orders to allOrders');
         } catch (e) {
-          print('❌ Error loading orders for group ${groupOrder.id}: $e');
+          // Error loading orders for this group - continue with next group
         }
       }
           
-      print('✅ Loaded ${allOrders.length} total orders from ${allGroupOrders.length} group orders for driver ${currentUser!.uid}');
-      
-      // Show breakdown by group status
-      final completedGroups = allGroupOrders.where((g) => g.status == 'completed').length;
-      final ordersFromCompleted = allOrders.where((order) => 
-        allGroupOrders.any((group) => group.id == order.groupId && group.status == 'completed')
-      ).length;
-      
-      print('📊 Orders breakdown: $ordersFromCompleted orders from $completedGroups completed groups');
     } catch (e) {
-      print('❌ Error loading orders: $e');
       allOrders = [];
     }
   }
@@ -151,8 +149,6 @@ class _DriverRevenuePageState extends State<DriverRevenuePage>
     if (currentUser == null) return;
 
     try {
-      print('🔍 Loading group orders for driver: ${currentUser!.uid}');
-      
       // Get all group orders for this driver using runner_id first (without orderBy to avoid index requirement)
       final groupOrdersSnapshot = await FirebaseFirestore.instance
           .collection('grouporders')
@@ -161,25 +157,13 @@ class _DriverRevenuePageState extends State<DriverRevenuePage>
 
       allGroupOrders = groupOrdersSnapshot.docs
           .map((doc) {
-            print('📦 Group order data: ${doc.data()}');
             return GroupOrder.fromFirestore(doc.data(), doc.id);
           })
           .toList();
-          
-      print('✅ Loaded ${allGroupOrders.length} group orders for driver ${currentUser!.uid}');
-      
-      // Print status breakdown
-      final statusCounts = <String, int>{};
-      for (var order in allGroupOrders) {
-        statusCounts[order.status] = (statusCounts[order.status] ?? 0) + 1;
-      }
-      print('📊 Group order status breakdown: $statusCounts');
       
     } catch (e) {
-      print('❌ Error loading group orders with runner_id: $e');
       // Try alternative query if the first one fails (fallback to driver_id)
       try {
-        print('🔄 Trying fallback query with driver_id');
         final fallbackSnapshot = await FirebaseFirestore.instance
             .collection('grouporders')
             .where('driver_id', isEqualTo: currentUser!.uid)
@@ -187,158 +171,45 @@ class _DriverRevenuePageState extends State<DriverRevenuePage>
 
         allGroupOrders = fallbackSnapshot.docs
             .map((doc) {
-              print('📦 Fallback group order data: ${doc.data()}');
               return GroupOrder.fromFirestore(doc.data(), doc.id);
             })
             .toList();
-            
-        print('✅ Loaded ${allGroupOrders.length} group orders using fallback driver_id query');
-        
-        // Print status breakdown for fallback
-        final statusCounts = <String, int>{};
-        for (var order in allGroupOrders) {
-          statusCounts[order.status] = (statusCounts[order.status] ?? 0) + 1;
-        }
-        print('📊 Fallback group order status breakdown: $statusCounts');
         
       } catch (fallbackError) {
-        print('❌ Fallback group orders query also failed: $fallbackError');
         allGroupOrders = [];
       }
     }
   }
 
-  void _calculateRevenue() {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final thisMonth = DateTime(now.year, now.month, 1);
-    final thisYear = DateTime(now.year, 1, 1);
-
-    // Reset counters
-    todayRevenue = 0.0;
-    monthRevenue = 0.0;
-    yearRevenue = 0.0;
-    totalRevenue = 0.0;
-    
-    todayOrders = 0;
-    monthOrders = 0;
-    yearOrders = 0;
-    totalOrders = 0;
-
-    print('🔍 Calculating revenue from ${allGroupOrders.length} group orders');
-    print('🔍 Total individual orders loaded: ${allOrders.length}');
-
-    // Calculate revenue from completed group orders only
-    final completedGroupOrders = allGroupOrders.where((group) => group.status == 'completed').toList();
-    print('🎯 Processing ${completedGroupOrders.length} completed group orders');
-
-    for (var groupOrder in completedGroupOrders) {
-      print('📦 Processing completed group order ${groupOrder.id}');
-      
-      // Use completed_at timestamp if available, otherwise fall back to updated_at
-      final completionDate = groupOrder.completedAt?.toDate() ?? groupOrder.updatedAt.toDate();
-      print('📅 Completion date for ${groupOrder.id}: $completionDate');
-
-      // Find all orders that belong to this completed group order
-      final groupOrdersInList = allOrders.where((order) => order.groupId == groupOrder.id).toList();
-      print('🔗 Found ${groupOrdersInList.length} orders for completed group ${groupOrder.id}');
-      
-      // Calculate total delivery fees for this group order
-      double groupRevenue = 0.0;
-      for (var order in groupOrdersInList) {
-        final fee = order.deliveryFeeAsDouble;
-        print('💰 Order ${order.id}: delivery_fee = "${order.deliveryFee}" -> RM$fee');
-        groupRevenue += fee;
-      }
-
-      print('💵 Total revenue for group ${groupOrder.id}: RM$groupRevenue');
-
-      // Only add to totals if this group has revenue
-      if (groupRevenue > 0) {
-        totalRevenue += groupRevenue;
-        totalOrders++;
-
-        if (completionDate.isAfter(today) || completionDate.isAtSameMomentAs(today)) {
-          todayRevenue += groupRevenue;
-          todayOrders++;
-          print('📊 Added RM$groupRevenue to today\'s revenue');
-        }
-
-        if (completionDate.isAfter(thisMonth) || completionDate.isAtSameMomentAs(thisMonth)) {
-          monthRevenue += groupRevenue;
-          monthOrders++;
-          print('📊 Added RM$groupRevenue to month\'s revenue');
-        }
-
-        if (completionDate.isAfter(thisYear) || completionDate.isAtSameMomentAs(thisYear)) {
-          yearRevenue += groupRevenue;
-          yearOrders++;
-          print('📊 Added RM$groupRevenue to year\'s revenue');
-        }
-      } else {
-        print('⚠️ Group ${groupOrder.id} has no revenue (no orders or zero fees)');
-      }
-    }
-
-    print('🎯 Final revenue calculation:');
-    print('   Today: RM$todayRevenue ($todayOrders orders)');
-    print('   Month: RM$monthRevenue ($monthOrders orders)');
-    print('   Year: RM$yearRevenue ($yearOrders orders)');
-    print('   Total: RM$totalRevenue ($totalOrders orders)');
-  }
-
   List<GroupOrder> _getFilteredGroupOrders() {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final thisMonth = DateTime(now.year, now.month, 1);
-    final thisYear = DateTime(now.year, 1, 1);
-
-    return allGroupOrders.where((groupOrder) {
-      // Only show completed group orders
-      if (groupOrder.status != 'completed') return false;
-      
-      final completionDate = groupOrder.completedAt?.toDate() ?? groupOrder.updatedAt.toDate();
-      
-      switch (selectedPeriod) {
-        case 'today':
-          return completionDate.isAfter(today) || completionDate.isAtSameMomentAs(today);
-        case 'month':
-          return completionDate.isAfter(thisMonth) || completionDate.isAtSameMomentAs(thisMonth);
-        case 'year':
-          return completionDate.isAfter(thisYear) || completionDate.isAtSameMomentAs(thisYear);
-        case 'all':
-        default:
-          return true;
-      }
-    }).toList();
+    return RevenueService.getFilteredGroupOrders(
+      allGroupOrders: allGroupOrders,
+      selectedPeriod: selectedPeriod,
+    );
   }
 
   double _getFilteredRevenue() {
-    switch (selectedPeriod) {
-      case 'today':
-        return todayRevenue;
-      case 'month':
-        return monthRevenue;
-      case 'year':
-        return yearRevenue;
-      case 'all':
-      default:
-        return totalRevenue;
-    }
+    final revenueData = RevenueService.calculateRevenue(
+      allGroupOrders: allGroupOrders,
+      allOrders: allOrders,
+    );
+    
+    return RevenueService.getFilteredRevenue(
+      selectedPeriod: selectedPeriod,
+      revenueData: revenueData,
+    );
   }
 
   int _getFilteredOrderCount() {
-    switch (selectedPeriod) {
-      case 'today':
-        return todayOrders;
-      case 'month':
-        return monthOrders;
-      case 'year':
-        return yearOrders;
-      case 'all':
-      default:
-        return totalOrders;
-    }
+    final revenueData = RevenueService.calculateRevenue(
+      allGroupOrders: allGroupOrders,
+      allOrders: allOrders,
+    );
+    
+    return RevenueService.getFilteredOrderCount(
+      selectedPeriod: selectedPeriod,
+      revenueData: revenueData,
+    );
   }
 
   void _showErrorSnackBar(String message) {

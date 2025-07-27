@@ -6,6 +6,8 @@ import '../services/route_service.dart';
 import '../services/order_service.dart';
 import '../services/delivery_route_service.dart';
 import '../services/chat_service.dart';
+import '../services/timer_utils_service.dart';
+import '../services/location_service.dart';
 import '../chat_page.dart';
 import '../chat_room_list_page.dart';
 import 'driver_revenue.dart';
@@ -35,10 +37,9 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   String? selectedOrderId;
   List<LatLng> allDeliveryLocations = []; // For showing all delivery markers
   List<Order> currentGroupDeliveries = []; // Store current group deliveries data
-  final LatLng driverLocation = LatLng(
-    3.139,
-    101.6869,
-  ); // Current driver location (Kuala Lumpur)
+  LatLng? driverLocation; // Will be set only when location permission is granted
+  bool _locationPermissionGranted = false;
+  StreamSubscription<LatLng>? _locationSubscription;
   
   // Filter settings
   String selectedFilter = 'all'; // 'all', 'my_orders', 'available', 'urgent', 'today'
@@ -62,14 +63,193 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       parent: _expansionController,
       curve: Curves.easeInOut,
     );
-    _loadCurrentUser();
+    _initializeLocationAndUser();
   }
 
   @override
   void dispose() {
     _expansionController.dispose();
     _ordersSubscription?.cancel();
+    _locationSubscription?.cancel();
     super.dispose();
+  }
+
+  /// Initialize location services and user data
+  Future<void> _initializeLocationAndUser() async {
+    // Start with loading user first
+    await _loadCurrentUser();
+    
+    // Then initialize location services
+    await _initializeLocationServices();
+  }
+
+  /// Initialize location services and start tracking
+  Future<void> _initializeLocationServices() async {
+    try {
+      // Request location permission
+      final permissionResult = await LocationService.requestLocationPermission();
+      
+      if (permissionResult.granted) {
+        _locationPermissionGranted = true;
+        
+        // Get initial location
+        final initialLocation = await LocationService.getCurrentPosition();
+        if (initialLocation != null) {
+          setState(() {
+            driverLocation = initialLocation;
+          });
+        }
+        
+        // Start location tracking
+        final trackingStarted = await LocationService.instance.startLocationTracking();
+        if (trackingStarted) {
+          _locationSubscription = LocationService.instance.locationStream.listen(
+            (LatLng newLocation) {
+              final oldLocation = driverLocation;
+              setState(() {
+                driverLocation = newLocation;
+              });
+              
+              // Calculate distance moved only if we had a previous location
+              if (oldLocation != null) {
+                final distanceMoved = LocationService.getDistanceBetween(oldLocation, newLocation);
+                
+                print('Driver location updated: ${newLocation.latitude}, ${newLocation.longitude}');
+                print('Distance moved: ${distanceMoved.toStringAsFixed(0)}m');
+                
+                // Refresh orders if driver moved more than 100 meters
+                // This ensures nearby orders are updated based on new location
+                if (distanceMoved > 100) {
+                  print('Significant location change detected, refreshing orders...');
+                  _loadGroupOrders();
+                }
+              } else {
+                print('Driver location set for first time: ${newLocation.latitude}, ${newLocation.longitude}');
+                // Load orders for the first time when location is available
+                _loadGroupOrders();
+              }
+            },
+            onError: (error) {
+              print('Location stream error: $error');
+            },
+          );
+        }
+      } else {
+        _locationPermissionGranted = false;
+        // Show permission dialog
+        _showLocationPermissionDialog(permissionResult);
+      }
+    } catch (e) {
+      print('Error initializing location services: $e');
+      _showLocationErrorDialog('Failed to initialize location services: $e');
+    }
+  }
+
+  /// Show location permission dialog
+  void _showLocationPermissionDialog(LocationPermissionResult result) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Permission'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.location_off,
+                size: 48,
+                color: Colors.orange,
+              ),
+              const SizedBox(height: 16),
+              Text(result.message),
+              const SizedBox(height: 16),
+              const Text(
+                'Location access is required for:\n'
+                '• Finding nearby orders\n'
+                '• Navigation and route planning\n'
+                '• Distance calculations\n'
+                '• Accurate delivery tracking',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+          actions: [
+            if (result.canRequestAgain)
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _initializeLocationServices(); // Try again
+                },
+                child: const Text('Try Again'),
+              ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                if (!result.canRequestAgain) {
+                  LocationService.openAppSettings();
+                }
+              },
+              child: Text(result.canRequestAgain ? 'Skip' : 'Open Settings'),
+            ),
+            if (!result.canRequestAgain)
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text('Continue'),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Show location error dialog
+  void _showLocationErrorDialog(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'Settings',
+          textColor: Colors.white,
+          onPressed: () {
+            LocationService.openLocationSettings();
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Refresh current location manually
+  Future<void> _refreshLocation() async {
+    try {
+      final newLocation = await LocationService.getCurrentPosition();
+      if (newLocation != null) {
+        setState(() {
+          driverLocation = newLocation;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location updated successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to get current location'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      _showLocationErrorDialog('Error refreshing location: $e');
+    }
   }
 
   Future<void> _loadCurrentUser() async {
@@ -82,8 +262,10 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
         });
         // Load delivery preferences after user is loaded
         await _loadDeliveryPreferences();
-        // Load group orders after preferences are loaded
-        await _loadGroupOrders();
+        // Load group orders only if location is available
+        if (driverLocation != null) {
+          await _loadGroupOrders();
+        }
         // Set up real-time listener
         _setupRealTimeListener();
       }
@@ -96,7 +278,10 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           currentUser = basicUser;
         });
         await _loadDeliveryPreferences();
-        await _loadGroupOrders();
+        // Load group orders only if location is available
+        if (driverLocation != null) {
+          await _loadGroupOrders();
+        }
         // Set up real-time listener
         _setupRealTimeListener();
       }
@@ -149,12 +334,21 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       return;
     }
     
+    // Only load orders if we have a valid location
+    if (driverLocation == null) {
+      print('No driver location available, skipping order loading');
+      return;
+    }
+    
     setState(() {
       isLoading = true;
     });
 
     try {
+      print('Loading orders with driver location: ${driverLocation!.latitude}, ${driverLocation!.longitude}');
       final orders = await getAllOrders();
+      print('Total orders received: ${orders.length}');
+      
       setState(() {
         groupOrders = orders;
         isLoading = false;
@@ -184,7 +378,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           (snapshot) {
             // Refresh orders when there are changes to driver's assigned orders
             _loadGroupOrders();
-            print('Real-time update: Driver orders changed, refreshing list');
           },
           onError: (error) {
             print('Error in real-time listener: $error');
@@ -213,7 +406,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
             
             if (hasDeliveredOrders) {
               _loadGroupOrders();
-              print('Real-time update: Order delivery status changed, refreshing list');
             }
           },
           onError: (error) {
@@ -383,6 +575,144 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
               fontWeight: FontWeight.w500,
             ),
           ),
+          const SizedBox(width: 8),
+          // Refresh orders button
+          InkWell(
+            onTap: isLoading ? null : _loadGroupOrders,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: isLoading 
+                    ? Colors.grey.withOpacity(0.1) 
+                    : Colors.green.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isLoading ? Colors.grey : Colors.green, 
+                  width: 1
+                ),
+              ),
+              child: isLoading
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.grey),
+                      ),
+                    )
+                  : Icon(
+                      Icons.refresh,
+                      size: 16,
+                      color: Colors.green[600],
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build location info display
+  Widget _buildLocationInfo() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Icon(Icons.location_on, color: Colors.blue[600], size: 16),
+          const SizedBox(width: 8),
+          Text(
+            'Location:',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[700],
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              driverLocation != null 
+                  ? '${driverLocation!.latitude.toStringAsFixed(4)}, ${driverLocation!.longitude.toStringAsFixed(4)}'
+                  : 'Location not available',
+              style: TextStyle(
+                color: driverLocation != null ? Colors.grey[600] : Colors.red[600],
+                fontSize: 11,
+                fontFamily: driverLocation != null ? 'monospace' : null,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Refresh location button
+          InkWell(
+            onTap: _refreshLocation,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.blue, width: 1),
+              ),
+              child: Icon(
+                Icons.refresh,
+                size: 16,
+                color: Colors.blue[600],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (driverLocation != null && _locationPermissionGranted && LocationService.instance.isTracking)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green, width: 1),
+              ),
+              child: Text(
+                'LIVE',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.green[700],
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            )
+          else if (driverLocation != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange, width: 1),
+              ),
+              child: Text(
+                'STATIC',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.orange[700],
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red, width: 1),
+              ),
+              child: Text(
+                'NO LOCATION',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.red[700],
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -394,17 +724,20 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   }
 
   Future<List<GroupOrder>> getAllOrders() async {
+    // Return empty list if no location is available
+    if (driverLocation == null) {
+      return [];
+    }
+    
     final ordersData = await OrderService.getAllOrders(
       currentUserId: currentUser?.uid,
       deliveryPreferences: deliveryPreferences,
-      driverLocation: driverLocation,
+      driverLocation: driverLocation!,
     );
     
     final orders = ordersData.map((data) => GroupOrder.fromFirestore(data, data['id'] ?? '')).toList();
     
     // Sort orders by priority:
-    // 1. First: My accepted orders (assigned to current driver)
-    // 2. Then: Available orders sorted by closest scheduled time
     orders.sort((a, b) {
       final bool aIsMyOrder = a.driverId == currentUser?.uid;
       final bool bIsMyOrder = b.driverId == currentUser?.uid;
@@ -445,8 +778,19 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   }
 
   Future<void> getRoute(LatLng destination) async {
+    if (driverLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Location not available. Please enable location permissions.'),
+          duration: Duration(seconds: 3),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
     try {
-      final route = await RouteService.getRoute(driverLocation, destination);
+      final route = await RouteService.getRoute(driverLocation!, destination);
       setState(() {
         routePoints = route;
       });
@@ -476,9 +820,13 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   }
 
   Future<List<LatLng>> optimizeDeliveryRoute(List<Map<String, dynamic>> orders) async {
+    if (driverLocation == null) {
+      return [];
+    }
+    
     return await DeliveryRouteService.optimizeDeliveryRoute(
       orders: orders,
-      driverLocation: driverLocation,
+      driverLocation: driverLocation!,
     );
   }
 
@@ -495,6 +843,39 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     } catch (e) {
       print('Error getting optimized route: $e');
     }
+  }
+
+  double _calculateTotalDistance() {
+    if (allDeliveryLocations.isEmpty || driverLocation == null) return 0.0;
+    
+    double totalDistance = 0.0;
+    List<LatLng> allPoints = [driverLocation!, ...allDeliveryLocations];
+    
+    // Calculate distance between consecutive points in the route
+    for (int i = 0; i < allPoints.length - 1; i++) {
+      totalDistance += calculateDistance(allPoints[i], allPoints[i + 1]);
+    }
+    
+    return totalDistance;
+  }
+
+  double _calculateTotalDeliveryFee() {
+    if (currentGroupDeliveries.isEmpty) return 0.0;
+    
+    double totalFee = 0.0;
+    for (var delivery in currentGroupDeliveries) {
+      totalFee += delivery.deliveryFeeAsDouble;
+    }
+    
+    return totalFee;
+  }
+
+  bool _isOrderReadyForDelivery(GroupOrder order) {
+    return TimerUtilsService.isOrderReadyForDelivery(order.scheduledTime);
+  }
+
+  String _getTimeUntilReady(GroupOrder order) {
+    return TimerUtilsService.getTimeUntilReady(order.scheduledTime);
   }
 
   void onOrderTapped(GroupOrder order) async {
@@ -585,7 +966,9 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     }
 
     try {
+      // pass group order id to accept order
       final orderData = order.toMap()..['id'] = order.id;
+      print(orderData);
       final success = await OrderService.acceptOrder(
         order: orderData,
         currentUserId: currentUser!.uid,
@@ -632,7 +1015,44 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
   }
 
   void _navigateToLiveDelivery(GroupOrder order) async {
+    // Check if location is available
+    if (driverLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Location not available. Please enable location permissions.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+    
     try {
+      // Check if the order is within 30 minutes of scheduled time
+      if (order.scheduledTime != null) {
+        final now = DateTime.now();
+        final scheduledTime = order.scheduledTime!.toDate();
+        final timeDifference = scheduledTime.difference(now);
+        
+        // If more than 30 minutes before scheduled time, show warning
+        if (timeDifference.inMinutes > 30) {
+          final hoursUntil = timeDifference.inHours;
+          final minutesUntil = timeDifference.inMinutes % 60;
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Cannot start delivery yet. Please wait until 30 minutes before scheduled pickup time.\n'
+                'Time remaining: ${hoursUntil > 0 ? '${hoursUntil}h ' : ''}${minutesUntil}m',
+              ),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+          return;
+        }
+      }
+
       // Get all deliveries for this group order
       String groupId = order.id;
       final List<Order> groupDeliveries = await getOrdersByGroupId(groupId);
@@ -662,7 +1082,7 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           'vendorLocation': vendorLocation,
           'vendorInfo': vendorInfo,
           'currentUser': currentUser,
-          'driverLocation': driverLocation,
+          'driverLocation': driverLocation!,
         },
       );
       
@@ -752,31 +1172,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     return polylines;
   }
 
-  double _calculateTotalDistance() {
-    if (allDeliveryLocations.isEmpty) return 0.0;
-    
-    double totalDistance = 0.0;
-    List<LatLng> allPoints = [driverLocation, ...allDeliveryLocations];
-    
-    // Calculate distance between consecutive points in the route
-    for (int i = 0; i < allPoints.length - 1; i++) {
-      totalDistance += calculateDistance(allPoints[i], allPoints[i + 1]);
-    }
-    
-    return totalDistance;
-  }
-
-  double _calculateTotalDeliveryFee() {
-    if (currentGroupDeliveries.isEmpty) return 0.0;
-    
-    double totalFee = 0.0;
-    for (var delivery in currentGroupDeliveries) {
-      totalFee += delivery.deliveryFeeAsDouble;
-    }
-    
-    return totalFee;
-  }
-
   Color _getStatusColor(String? status) {
     switch (status?.toLowerCase()) {
       case 'open':
@@ -859,175 +1254,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
       );
     } catch (e) {
       return const SizedBox.shrink();
-    }
-  }
-
-  // Build dev tools button for testing
-  Widget _buildDevToolsButton() {
-    return Container(
-      width: 50,
-      height: 50,
-      decoration: BoxDecoration(
-        color: Colors.orange[600],
-        borderRadius: BorderRadius.circular(25),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(25),
-          onTap: () {
-            _showDevToolsMenu();
-          },
-          child: Center(
-            child: Icon(
-              Icons.developer_mode,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Show dev tools menu
-  void _showDevToolsMenu() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.8,
-            padding: EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '🛠️ Dev Tools',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.orange[700],
-                  ),
-                ),
-                SizedBox(height: 20),
-                _buildDevToolButton(
-                  'Create Sample Group Order',
-                  Icons.add_shopping_cart,
-                  () => _createSampleGroupOrder(),
-                ),
-                SizedBox(height: 20),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text('Close'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDevToolButton(String title, IconData icon, VoidCallback onTap) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: 18),
-        label: Text(title),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.orange[100],
-          foregroundColor: Colors.orange[700],
-          padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Dev Tools Functions
-  Future<void> _createSampleGroupOrder() async {
-    Navigator.of(context).pop(); // Close dialog first
-    
-    try {
-      // Create sample group order with auto-generated ID
-      final groupOrderRef = FirebaseFirestore.instance.collection('grouporders').doc();
-      final groupOrderId = groupOrderRef.id;
-      
-      // Create sample group order with your exact structure
-      await groupOrderRef.set({
-        'driver_id': "",
-        'scheduled_time': Timestamp.fromDate(DateTime.now().add(Duration(hours: 1))),
-        'status': 'pending', // Set as pending so it can be accepted
-        'updated_at': Timestamp.now(),
-        'vendor_id': 'tBsSsfZHD6TBXuMXgw5uoZZF1l32',
-      });
-
-      // Create sample individual orders with your exact structure
-      final sampleOrders = [
-        {
-          'created_at': Timestamp.now(),
-          'delivery_address': '123 Test Street, KL',
-          'delivery_fee': '5.00',
-          'delivery_latitude': '3.1410',
-          'delivery_longitude': '101.6890',
-          'group_id': groupOrderId,
-          'status': 'pending',
-          'updated_at': Timestamp.now(),
-          'vendor_id': 'tBsSsfZHD6TBXuMXgw5uoZZF1l32',
-          'customer_id': '80TRCThr3COdsx2dhBEQYKeCDMx2', // Add customer ID for chat room creation
-        },
-        {
-          'created_at': Timestamp.fromDate(DateTime.parse('2025-07-25 07:01:54')),
-          'delivery_address': '456 Another Street, KL',
-          'delivery_fee': '5.00',
-          'delivery_latitude': '3.1500',
-          'delivery_longitude': '101.7000',
-          'group_id': groupOrderId,
-          'status': 'pending',
-          'updated_at': Timestamp.now(),
-          'vendor_id': 'tBsSsfZHD6TBXuMXgw5uoZZF1l32',
-          'customer_id': '80TRCThr3COdsx2dhBEQYKeCDMx2', // Add customer ID for chat room creation
-        }
-      ];
-
-      final batch = FirebaseFirestore.instance.batch();
-      for (var order in sampleOrders) {
-        final orderRef = FirebaseFirestore.instance.collection('orders').doc();
-        batch.set(orderRef, order);
-      }
-      await batch.commit();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Sample group order created: $groupOrderId'),
-          backgroundColor: Colors.green,
-        ),
-      );
-
-      // Refresh orders
-      await _loadGroupOrders();
-      
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Error creating sample order: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 
@@ -1264,10 +1490,10 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.circular(16),
                 child: FlutterMap(
                   options: MapOptions(
-                    initialCenter: LatLng(
+                    initialCenter: driverLocation ?? LatLng(
                       3.139,
                       101.6869,
-                    ), // Kuala Lumpur coordinates
+                    ), // Use driver location if available, otherwise default to Kuala Lumpur
                     initialZoom: 13.0,
                   ),
                   children: [
@@ -1283,15 +1509,16 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                       ),
                     MarkerLayer(
                       markers: [
-                        // Driver location marker
-                        Marker(
-                          point: driverLocation,
-                          child: const Icon(
-                            Icons.local_shipping,
-                            color: Colors.green,
-                            size: 40,
+                        // Driver location marker - only show if location is available
+                        if (driverLocation != null)
+                          Marker(
+                            point: driverLocation!,
+                            child: const Icon(
+                              Icons.local_shipping,
+                              color: Colors.green,
+                              size: 40,
+                            ),
                           ),
-                        ),
                         // All delivery location markers (for group orders) with matching colors
                         ...allDeliveryLocations.asMap().entries.map((entry) {
                           final int index = entry.key;
@@ -1393,13 +1620,46 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                           },
                           child: ListView(
                             physics: const AlwaysScrollableScrollPhysics(),
-                            children: const [
-                              SizedBox(height: 200),
+                            children: [
+                              const SizedBox(height: 200),
                               Center(
-                                child: Text(
-                                  'No group orders found\nPull down to refresh',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                                child: Column(
+                                  children: [
+                                    if (driverLocation == null) ...[
+                                      Icon(
+                                        Icons.location_off,
+                                        size: 48,
+                                        color: Colors.red[400],
+                                      ),
+                                      const SizedBox(height: 16),
+                                      const Text(
+                                        'Location Required',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.red,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        'Please enable location permissions\nto view available orders',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                                      ),
+                                    ] else ...[
+                                      Icon(
+                                        Icons.inbox_outlined,
+                                        size: 48,
+                                        color: Colors.grey[400],
+                                      ),
+                                      const SizedBox(height: 16),
+                                      const Text(
+                                        'No group orders found\nPull down to refresh',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                                      ),
+                                    ]
+                                  ],
                                 ),
                               ),
                             ],
@@ -1409,6 +1669,72 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                           children: [
                             // Filter dropdown
                             _buildFilterDropdown(),
+                            // Location info
+                            _buildLocationInfo(),
+                            // Divider
+                            Divider(height: 1, color: Colors.grey[300]),
+                            // Refresh button at top - always visible
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Orders',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                  InkWell(
+                                    onTap: isLoading ? null : _loadGroupOrders,
+                                    borderRadius: BorderRadius.circular(20),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: isLoading 
+                                            ? Colors.grey.withOpacity(0.1) 
+                                            : Colors.blue.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                          color: isLoading ? Colors.grey : Colors.blue, 
+                                          width: 1
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          isLoading
+                                              ? SizedBox(
+                                                  width: 14,
+                                                  height: 14,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.grey),
+                                                  ),
+                                                )
+                                              : Icon(
+                                                  Icons.refresh,
+                                                  size: 14,
+                                                  color: Colors.blue[600],
+                                                ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            'Refresh',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: isLoading ? Colors.grey : Colors.blue[600],
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             // Divider
                             Divider(height: 1, color: Colors.grey[300]),
                             // Orders list
@@ -1418,26 +1744,33 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                       onRefresh: () async {
                                         await _loadGroupOrders();
                                       },
-                                      child: ListView(
-                                        physics: const AlwaysScrollableScrollPhysics(),
-                                        children: [
-                                          const SizedBox(height: 100),
-                                          Center(
-                                            child: Column(
-                                              children: [
-                                                Icon(Icons.filter_list_off, 
-                                                     size: 48, 
-                                                     color: Colors.grey[400]),
-                                                const SizedBox(height: 16),
-                                                Text(
-                                                  'No orders match your filter\nTry changing the filter or pull to refresh',
-                                                  textAlign: TextAlign.center,
-                                                  style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          return SingleChildScrollView(
+                                            physics: const AlwaysScrollableScrollPhysics(),
+                                            child: ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                minHeight: constraints.maxHeight,
+                                              ),
+                                              child: Center(
+                                                child: Column(
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    Icon(Icons.filter_list_off, 
+                                                         size: 48, 
+                                                         color: Colors.grey[400]),
+                                                    const SizedBox(height: 16),
+                                                    Text(
+                                                      'No orders match your filter\nTry changing the filter or pull to refresh',
+                                                      textAlign: TextAlign.center,
+                                                      style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                                                    ),
+                                                  ],
                                                 ),
-                                              ],
+                                              ),
                                             ),
-                                          ),
-                                        ],
+                                          );
+                                        },
                                       ),
                                     )
                                   : RefreshIndicator(
@@ -1523,7 +1856,7 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                         ),
                                       ),
                                       Text(
-                                        '${_formatTimestamp(order.scheduledTime)}',
+                                        '${TimerUtilsService.formatTimestamp(order.scheduledTime)}',
                                       ),
                                       if (isAssignedToMe && order.scheduledTime != null) ...[
                                         const SizedBox(width: 8),
@@ -1568,31 +1901,51 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
                                     children: [
                                       // Different button based on order status
                                       if (isAssignedToMe)
-                                        ElevatedButton.icon(
-                                          onPressed: () => _navigateToLiveDelivery(order),
-                                          icon: const Icon(
-                                            Icons.navigation, 
-                                            size: 18,
-                                            color: Colors.white,
-                                          ),
-                                          label: const Text(
-                                            'View Order',
-                                            style: TextStyle(
-                                              color: Colors.white,
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            ElevatedButton.icon(
+                                              onPressed: _isOrderReadyForDelivery(order) 
+                                                  ? () => _navigateToLiveDelivery(order)
+                                                  : null,
+                                              icon: Icon(
+                                                _isOrderReadyForDelivery(order) ? Icons.navigation : Icons.schedule,
+                                                size: 18,
+                                                color: Colors.white,
+                                              ),
+                                              label: Text(
+                                                _isOrderReadyForDelivery(order) ? 'View Order' : 'Not Ready',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: _isOrderReadyForDelivery(order) 
+                                                    ? Colors.blue 
+                                                    : Colors.grey,
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 16,
+                                                  vertical: 8,
+                                                ),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                elevation: 2,
+                                              ),
                                             ),
-                                          ),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.blue,
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 8,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(6),
-                                            ),
-                                            elevation: 2,
-                                          ),
+                                            if (!_isOrderReadyForDelivery(order))
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 4, left: 4),
+                                                child: Text(
+                                                  _getTimeUntilReady(order),
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
                                         )
                                       else
                                         ElevatedButton.icon(
@@ -1749,12 +2102,6 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
           ),
           ],
         ),
-          // Positioned dev tools button above chat button
-          Positioned(
-            bottom: 90,
-            right: 20,
-            child: _buildDevToolsButton(),
-          ),
           // Positioned chat button in bottom right
           Positioned(
             bottom: 20,
@@ -1766,22 +2113,4 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     );
   }
 
-  String _formatTimestamp(dynamic timestamp) {
-    if (timestamp == null) return 'N/A';
-
-    try {
-      DateTime dateTime;
-      if (timestamp is Timestamp) {
-        dateTime = timestamp.toDate();
-      } else if (timestamp is DateTime) {
-        dateTime = timestamp;
-      } else {
-        return 'Invalid date';
-      }
-
-      return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } catch (e) {
-      return 'Invalid date';
-    }
-  }
 }
