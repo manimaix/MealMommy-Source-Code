@@ -11,6 +11,7 @@ class OrderPage extends StatefulWidget {
 }
 
 class _OrderPageState extends State<OrderPage> {
+  int _selectedIndex = 0;
   Future<List<Map<String, dynamic>>> _fetchPendingOrders() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return [];
@@ -154,6 +155,41 @@ class _OrderPageState extends State<OrderPage> {
           );
         },
       ),
+
+            bottomNavigationBar: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          currentIndex: _selectedIndex,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.list_alt), label: "Orders"),
+            BottomNavigationBarItem(icon: Icon(Icons.fastfood), label: "Food List"),
+            BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
+            BottomNavigationBarItem(icon: Icon(Icons.menu_book), label: "Menu"),
+            BottomNavigationBarItem(icon: Icon(Icons.money), label: "Revenue"),
+          ],
+          onTap: (index) {
+            setState(() {
+              _selectedIndex = index;
+            });
+            switch (index) {
+              case 0:
+                Navigator.of(context).pushReplacementNamed('/order');
+                break;
+              case 1:
+                Navigator.of(context).pushReplacementNamed('/foodList');
+                break;
+              case 2:
+                Navigator.of(context).pushReplacementNamed('/vendor');
+                break;
+              case 3:
+                Navigator.of(context).pushReplacementNamed('/menu');
+                break;
+              case 4:
+                Navigator.of(context).pushReplacementNamed('/revenue');
+                break;
+            }
+          },
+        ),
+
     );
   }
 }

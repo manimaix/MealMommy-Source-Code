@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'global_app_bar.dart';
 import 'services/auth_service.dart';
 import 'models/user_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class NotificationPage extends StatefulWidget {
   const NotificationPage({super.key});
@@ -27,47 +28,50 @@ class _NotificationPageState extends State<NotificationPage> {
       setState(() {
         currentUser = user;
       });
+      _loadNotifications(); // Only load notifications after user is set
     }
   }
 
-  void _loadNotifications() {
-    // Sample notifications - replace with actual data from your backend
-    notifications = [
-      {
-        'id': '1',
-        'title': 'New Order Received',
-        'body': 'You have a new order from customer John Doe',
-        'timestamp': DateTime.now().subtract(const Duration(minutes: 30)),
-        'type': 'order',
-        'read': false,
-      },
-      {
-        'id': '2',
-        'title': 'Delivery Completed',
-        'body': 'Your delivery to Downtown was completed successfully',
-        'timestamp': DateTime.now().subtract(const Duration(hours: 2)),
-        'type': 'delivery',
-        'read': true,
-      },
-      {
-        'id': '3',
-        'title': 'Payment Received',
-        'body': 'Payment of \$25.50 has been received',
-        'timestamp': DateTime.now().subtract(const Duration(hours: 5)),
-        'type': 'payment',
-        'read': false,
-      },
-    ];
-  }
+  Future<void> _loadNotifications() async {
+    if (currentUser == null) return;
 
-  void _markAsRead(String notificationId) {
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('notifications')
+        .where('receiver_id', isEqualTo: currentUser!.uid)
+        .get();
+
+    final List<Map<String, dynamic>> fetchedNotifications = querySnapshot.docs.map((doc) {
+      final data = doc.data();
+      return {
+        'id': doc.id,
+        'title': data['title'] ?? '',
+        'body': data['body'] ?? '',
+        'timestamp': (data['sent_at'] as Timestamp).toDate(),
+        'type': data['type'] ?? '',
+        'read': data['seen'] ?? false,
+      };
+    }).toList();
+
     setState(() {
-      final index = notifications.indexWhere((n) => n['id'] == notificationId);
-      if (index != -1) {
-        notifications[index]['read'] = true;
-      }
+      notifications = fetchedNotifications;
     });
   }
+
+
+  void _markAsRead(String notificationId) async {
+    final index = notifications.indexWhere((n) => n['id'] == notificationId);
+    if (index != -1 && notifications[index]['read'] == false) {
+      setState(() {
+        notifications[index]['read'] = true;
+      });
+
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(notificationId)
+          .update({'seen': true});
+    }
+  }
+
 
   IconData _getNotificationIcon(String type) {
     switch (type) {

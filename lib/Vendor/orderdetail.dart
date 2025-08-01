@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../services/send_service.dart';
+// import '../services/send_service.dart';
 
 class OrderDetailPage extends StatefulWidget {
   const OrderDetailPage({super.key});
@@ -38,12 +38,15 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       final mealData = mealSnap.data();
 
       if (mealData != null) {
-        final currentQty = mealData['quantity_available'] ?? 0;
-        final updatedQty = currentQty - item['quantity'];
+      final currentQty = mealData['quantity_available'] ?? 0;
+      final orderedQty = item['quantity'];
 
-        await mealRef.update({
-          'quantity_available': updatedQty,
-          'status': updatedQty <= 0 ? false : mealData['status'],
+      final updatedQty = (currentQty - orderedQty) < 0 ? 0 : currentQty - orderedQty;
+      final updatedStatus = updatedQty <= 0 ? false : mealData['status'];
+
+      await mealRef.update({
+        'quantity_available': updatedQty,
+        'status': updatedStatus,
         });
       }
     }
@@ -56,28 +59,28 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       const SnackBar(content: Text('Order marked as confirmed')),
     );
 
-    final customerDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(customerUid)
-        .get();
+    // final customerDoc = await FirebaseFirestore.instance
+    //     .collection('users')
+    //     .doc(customerUid)
+    //     .get();
 
-    final customerToken = customerDoc.data()?['fcm_token'];
+    // final customerToken = customerDoc.data()?['fcm_token'];
 
-    // Send notification
-    if (customerToken != null) {
-      // 2. Send notification
-      await SendService.sendNotification(
-        fcmToken: customerToken,
-        title: 'Order Complete',
-        body: 'Your food is ready!',
-        data: {
-          'order_id': orderId,
-          'type': 'order_complete',
-        },
-      );
-    }
+    // // Send notification
+    // if (customerToken != null) {
+    //   // 2. Send notification
+    //   await SendService.sendNotification(
+    //     fcmToken: customerToken,
+    //     title: 'Order Complete',
+    //     body: 'Your food is ready!',
+    //     data: {
+    //       'order_id': orderId,
+    //       'type': 'order_complete',
+    //     },
+    //   );
+    // }
 
-    // store notification
+    // store notification (order complete)
     await FirebaseFirestore.instance.collection('notifications').add({
       'title': 'Order Complete',
       'body': 'Your food is ready!',
@@ -87,6 +90,29 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       'seen': false,
     });
 
+    // Save to revenue collection
+    double totalRevenue = 0.0;
+    for (var item in orderItems) {
+      totalRevenue += item['quantity'] * item['price'];
+    }
+
+    // store notification (revenue added)
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'title': 'Revenue Added',
+      'body': 'RM ${totalRevenue.toStringAsFixed(2)} has been added to your revenue.',
+      'sender_id': vendorVid,
+      'receiver_id': vendorVid,
+      'sent_at': Timestamp.now(),
+      'seen': false,
+    });
+
+    await FirebaseFirestore.instance.collection('revenue').add({
+      'order_id': orderId,
+      'sender_id': customerUid,
+      'receiver_id': vendorVid,
+      'revenue': totalRevenue,
+      'created_at': Timestamp.now(),
+    });
     setState(() {});
   }
 

@@ -43,11 +43,6 @@ class _HomePageState extends State<HomePage> {
  Future<Map<String, dynamic>> _fetchSummaryData() async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
-    final orderSnap = await FirebaseFirestore.instance
-        .collection('orders')
-        .where('vendor_id', isEqualTo: uid)
-        .where('status', isEqualTo: "pending")
-        .get();
     final menuSnap = await FirebaseFirestore.instance
         .collection('meals')
         .where('vendor_id', isEqualTo: uid)
@@ -60,7 +55,6 @@ class _HomePageState extends State<HomePage> {
         .get();
 
     return {
-      'orderCount': orderSnap.size,
       'menuCount': menuSnap.size,
       'certVerified': certSnap.docs.isNotEmpty,
     };
@@ -89,8 +83,10 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  Widget _buildDashboardBox(String title, String value, Color color) {
-    return Expanded(
+Widget _buildDashboardBox(String title, String value, Color color, VoidCallback onTap) {
+  return Expanded(
+    child: GestureDetector(
+      onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 4),
         padding: const EdgeInsets.all(16),
@@ -107,8 +103,10 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   Widget _buildOrderCard(int index, String orderId, String status) {
     return Card(
@@ -150,10 +148,12 @@ class _HomePageState extends State<HomePage> {
                     return Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        _buildDashboardBox("Orders", data['orderCount'].toString(), Colors.orange),
-                        _buildDashboardBox("Menu", data['menuCount'].toString(), Colors.blue),
-                        _buildDashboardBox("Cert", data['certVerified'] ? "Verified" : "Invalid",
-                            data['certVerified'] ? Colors.green : Colors.red),
+                        _buildDashboardBox("Menu", data['menuCount'].toString(), Colors.blue,
+                          () => Navigator.of(context).pushNamed('/menu'),
+                        ),
+                        _buildDashboardBox("Cert",data['certVerified'] ? "Verified" : "Invalid",Colors.green,
+                          () => Navigator.of(context).pushNamed('/cert'),
+                          ),
                       ],
                     );
                   },

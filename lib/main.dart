@@ -24,6 +24,7 @@ import 'vendor/editfood.dart';
 import 'vendor/foodsafety.dart';
 import 'models/meal_model.dart';
 import 'vendor/certificate.dart';
+import 'customer/user_profile.dart';
 
 
 void main() async {
@@ -88,6 +89,7 @@ class MyApp extends StatelessWidget {
         ),
         '/foodsafety': (context) => const FoodSafetyPage(),
         '/cert': (context) => const CertificatePage(),
+        '/profile': (context) => const UserProfilePage(),
         '/editfood': (context) => EditFoodPage(
           meal: ModalRoute.of(context)!.settings.arguments as Meal,
         ),

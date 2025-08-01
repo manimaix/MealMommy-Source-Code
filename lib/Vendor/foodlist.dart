@@ -12,6 +12,7 @@ class FoodListPage extends StatefulWidget {
 }
 
 class _FoodListPageState extends State<FoodListPage> {
+  int _selectedIndex = 1;
   Future<List<Meal>> _fetchMealsByCurrentUser() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return [];
@@ -193,6 +194,40 @@ class _FoodListPageState extends State<FoodListPage> {
           ),
         ],
       ),
+      bottomNavigationBar: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          currentIndex: _selectedIndex,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.list_alt), label: "Orders"),
+            BottomNavigationBarItem(icon: Icon(Icons.fastfood), label: "Food List"),
+            BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
+            BottomNavigationBarItem(icon: Icon(Icons.menu_book), label: "Menu"),
+            BottomNavigationBarItem(icon: Icon(Icons.money), label: "Revenue"),
+          ],
+          onTap: (index) {
+            setState(() {
+              _selectedIndex = index;
+            });
+            switch (index) {
+              case 0:
+                Navigator.of(context).pushReplacementNamed('/order');
+                break;
+              case 1:
+                Navigator.of(context).pushReplacementNamed('/foodList');
+                break;
+              case 2:
+                Navigator.of(context).pushReplacementNamed('/vendor');
+                break;
+              case 3:
+                Navigator.of(context).pushReplacementNamed('/menu');
+                break;
+              case 4:
+                Navigator.of(context).pushReplacementNamed('/revenue');
+                break;
+            }
+          },
+        ),
+
     );
   }
 }
