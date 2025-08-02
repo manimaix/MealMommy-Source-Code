@@ -215,9 +215,9 @@ class _LoginPageState extends State<LoginPage> {
         title: Row(
           children: [
             Image.asset(
-              'assets/icons/logo.png',
-              width: 28,
-              height: 28,
+              'assets/icons/Logo.png',
+              width: 40,
+              height: 40,
               errorBuilder: (context, error, stackTrace) {
                 // Fallback to material icon if asset fails to load
                 return Icon(
@@ -251,10 +251,18 @@ class _LoginPageState extends State<LoginPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // App Logo
-                  Icon(
-                    Icons.restaurant_menu,
-                    size: 80,
-                    color: Theme.of(context).primaryColor,
+                  Image.asset(
+                    'assets/icons/Logo.png',
+                    width: 100,
+                    height: 100,
+                    errorBuilder: (context, error, stackTrace) {
+                      // Fallback to material icon if asset fails to load
+                      return Icon(
+                        Icons.restaurant_menu,
+                        color: Theme.of(context).primaryColor,
+                        size: 28,
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   Text(
