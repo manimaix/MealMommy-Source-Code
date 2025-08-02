@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:io';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'services/chat_service.dart';
 import 'services/timer_utils_service.dart';
 
@@ -128,7 +125,6 @@ class _ChatPageState extends State<ChatPage> {
         'senderId': currentUserId!,
         'senderName': senderName,
         'text': messageText,
-        'mediaUrl': null,
         'type': 'text',
         'sentAt': Timestamp.now(),
       });
@@ -145,72 +141,6 @@ class _ChatPageState extends State<ChatPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to send message: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-
-    setState(() {
-      isSending = false;
-    });
-  }
-
-  Future<void> _sendImage() async {
-    if (currentChatRoomId == null) return;
-
-    try {
-      final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-      
-      if (image == null) return;
-
-      setState(() {
-        isSending = true;
-      });
-
-      // Upload image to Firebase Storage
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('chat_images')
-          .child(currentChatRoomId!)
-          .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
-
-      await storageRef.putFile(File(image.path));
-      final imageUrl = await storageRef.getDownloadURL();
-
-      // Get sender name
-      String senderName = 'Unknown User';
-      try {
-        final userDoc = await _firestore.collection('users').doc(currentUserId!).get();
-        if (userDoc.exists && userDoc.data()?['name'] != null) {
-          senderName = userDoc.data()!['name'];
-        }
-      } catch (e) {
-        // Could not fetch user name - continue with default
-      }
-
-      // Add message to chatmessages collection
-      await _firestore.collection('chatmessages').add({
-        'chatRoomId': currentChatRoomId,
-        'senderId': currentUserId!,
-        'senderName': senderName,
-        'text': null,
-        'mediaUrl': imageUrl,
-        'type': 'image',
-        'sentAt': Timestamp.now(),
-      });
-
-      // Update chatroom last message
-      await _firestore.collection('chatroom').doc(currentChatRoomId).update({
-        'lastMessage': '📷 Image',
-        'lastMessageTime': Timestamp.now(),
-      });
-
-      _scrollToBottom();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to send image: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -426,23 +356,6 @@ class _ChatPageState extends State<ChatPage> {
                         color: isMyMessage ? Colors.white : Colors.black87,
                         fontSize: 16,
                       ),
-                    )
-                  else if (messageType == 'image')
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        messageData['mediaUrl'] ?? '',
-                        width: 200,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: 200,
-                            height: 100,
-                            color: Colors.grey[300],
-                            child: const Icon(Icons.error),
-                          );
-                        },
-                      ),
                     ),
                   
                   const SizedBox(height: 4),
@@ -485,14 +398,6 @@ class _ChatPageState extends State<ChatPage> {
       ),
       child: Row(
         children: [
-          IconButton(
-            onPressed: isSending ? null : _sendImage,
-            icon: Icon(
-              Icons.image,
-              color: isSending ? Colors.grey : Colors.green[600],
-            ),
-          ),
-          
           Expanded(
             child: TextField(
               controller: _messageController,

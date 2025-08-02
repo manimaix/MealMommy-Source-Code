@@ -161,9 +161,7 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
                         );
                         break;
                       case 'profile':
-                        if (onProfile != null) {
-                          onProfile!();
-                        }
+                        Navigator.of(context).pushNamed('/profile');
                         break;
                       case 'logout':
                         _signOut(context);

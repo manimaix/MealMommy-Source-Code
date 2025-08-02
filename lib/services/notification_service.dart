@@ -20,7 +20,15 @@ class NotificationService {
 
   Future<void> init() async {
     try {
-      // Request permissions (iOS and web)
+      // Skip notification initialization on web platform to avoid service worker issues
+      if (kIsWeb) {
+        if (kDebugMode) {
+          print('Skipping FCM initialization on web platform');
+        }
+        return;
+      }
+
+      // Request permissions (iOS and mobile)
       NotificationSettings settings = await _fcm.requestPermission(
         alert: true,
         badge: true,
@@ -35,10 +43,10 @@ class NotificationService {
         print('User granted permission: ${settings.authorizationStatus}');
       }
 
-      // Set background message handler
+      // Set background message handler (mobile only)
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-      // Initialize local notifications
+      // Initialize local notifications (mobile only)
       const initSettings = InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         iOS: DarwinInitializationSettings(
@@ -56,7 +64,7 @@ class NotificationService {
       // Create notification channel for Android
       await _createNotificationChannel();
 
-      // Foreground messages
+      // Foreground messages (mobile only)
       FirebaseMessaging.onMessage.listen((message) {
         if (kDebugMode) {
           print('Got a message whilst in the foreground!');
@@ -65,7 +73,7 @@ class NotificationService {
         _showLocal(message);
       });
 
-      // Handle notification tap when app is in background/terminated
+      // Handle notification tap when app is in background/terminated (mobile only)
       FirebaseMessaging.onMessageOpenedApp.listen((message) {
         if (kDebugMode) {
           print('A new onMessageOpenedApp event was published!');
@@ -79,7 +87,7 @@ class NotificationService {
         _handleNotificationTap(initialMessage);
       }
 
-      // Get FCM token
+      // Get FCM token (mobile only)
       String? token = await _fcm.getToken();
       if (kDebugMode) {
         print('FCM Token: $token');
@@ -107,6 +115,9 @@ class NotificationService {
   }
 
   void _showLocal(RemoteMessage message) {
+    // Skip local notifications on web
+    if (kIsWeb) return;
+    
     final notification = message.notification;
     if (notification == null) return;
 

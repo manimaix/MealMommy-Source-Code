@@ -116,7 +116,6 @@ class ChatService {
         'senderId': 'system',
         'senderName': 'System',
         'text': message,
-        'mediaUrl': null,
         'type': 'system',
         'sentAt': Timestamp.now(),
       });

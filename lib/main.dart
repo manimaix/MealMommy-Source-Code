@@ -3,6 +3,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
 import 'services/notification_service.dart';
+import 'services/location_service.dart';
+import 'models/models.dart';
 import 'register_page.dart';
 import 'customer/customer_home.dart';
 import 'vendor/homepage.dart';
@@ -35,7 +37,10 @@ void main() async {
 
   // Initialize notification service
   final notificationService = NotificationService();
-  await notificationService.init();
+  if (!kIsWeb) {
+    // Only initialize notifications on mobile platforms
+    await notificationService.init();
+  }
 
   // Configure Firebase App Check based on platform
   if (kIsWeb) {
@@ -145,7 +150,8 @@ class _LoginPageState extends State<LoginPage> {
             Navigator.of(context).pushReplacementNamed('/vendor');
             break;
           case 'driver':
-            Navigator.of(context).pushReplacementNamed('/driver');
+            // Request location permission for drivers before navigation
+            await _requestDriverLocationPermission(user);
             break;
           default:
             // Default to customer if role is not recognized
@@ -162,6 +168,94 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
+    }
+  }
+
+  // Request location permission for drivers and navigate to driver home
+  Future<void> _requestDriverLocationPermission(AppUser user) async {
+    try {
+      // Request location permission
+      final permissionResult = await LocationService.requestLocationPermission();
+      
+      if (permissionResult.granted) {
+        // Permission granted, navigate to driver home
+        Navigator.of(context).pushReplacementNamed('/driver');
+      } else {
+        // Show permission dialog
+        await _showDriverLocationPermissionDialog(permissionResult, user);
+      }
+    } catch (e) {
+      print('Error requesting driver location permission: $e');
+      // Fallback: navigate to driver home anyway
+      Navigator.of(context).pushReplacementNamed('/driver');
+    }
+  }
+
+  // Show location permission dialog specifically for drivers
+  Future<void> _showDriverLocationPermissionDialog(LocationPermissionResult result, AppUser user) async {
+    final shouldContinue = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.local_shipping, color: Colors.blue, size: 24),
+              SizedBox(width: 8),
+              Text('Driver Location Access'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.location_off,
+                size: 48,
+                color: Colors.orange,
+              ),
+              const SizedBox(height: 16),
+              Text(result.message),
+              const SizedBox(height: 16),
+              const Text(
+                'As a driver, location access is essential for:\n'
+                '• Finding nearby delivery orders\n'
+                '• Navigation and route planning\n'
+                '• Real-time location tracking\n'
+                '• Accurate distance calculations\n'
+                '• Customer delivery updates',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+          actions: [
+            if (result.canRequestAgain)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false), // Try again
+                child: const Text('Try Again'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true), // Continue anyway
+              child: const Text('Continue Without Location'),
+            ),
+            if (!result.canRequestAgain)
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop(true);
+                  LocationService.openAppSettings();
+                },
+                child: const Text('Open Settings'),
+              ),
+          ],
+        );
+      },
+    );
+
+    if (shouldContinue == true) {
+      // Continue to driver home even without location permission
+      Navigator.of(context).pushReplacementNamed('/driver');
+    } else {
+      // Try requesting permission again
+      await _requestDriverLocationPermission(user);
     }
   }
 
