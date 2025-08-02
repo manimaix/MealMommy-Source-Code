@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:mealmommy_application/chat_page.dart';
+import 'package:mealmommy_application/chat_room_list_page.dart';
+import 'package:mealmommy_application/services/chat_service.dart';
 import '../services/notification_service.dart';
 import '../services/auth_service.dart';
 import '../models/user_model.dart';
@@ -119,6 +122,69 @@ Widget _buildDashboardBox(String title, String value, Color color, VoidCallback 
     );
   }
 
+  // Navigate to chat room selection or directly to chat if only one room
+  Future<void> _navigateToActiveDeliveryChat() async {
+    if (_currentUser == null) return;
+    
+    try {
+      // Get all active chat rooms for the user
+      final chatRooms = await ChatService.getUserChatRooms(_currentUser!.uid);
+      
+      if (chatRooms.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No active chat rooms found'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      if (chatRooms.length == 1) {
+        // Navigate directly to the single chat room
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatPage(
+                chatRoomId: chatRooms.first['id'],
+                currentUserId: _currentUser!.uid,
+              ),
+            ),
+          );
+        }
+      } else {
+        // Navigate to chat room selection page
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatRoomListPage(
+                currentUserId: _currentUser!.uid,
+                chatRooms: chatRooms,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error navigating to chat: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to open chat'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Stream<bool> _getUnreadMessagesStream() {
+    if (_currentUser == null) {
+      return Stream.value(false);
+    }
+    
+    return ChatService.hasUnreadMessages(_currentUser!.uid).asStream();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -231,6 +297,72 @@ Widget _buildDashboardBox(String title, String value, Color color, VoidCallback 
             }
           },
         ),
+      floatingActionButton: _buildChatButton(),
     );
   }
+    Widget _buildChatButton() {
+    // Always show the button if user is logged in
+    if (_currentUser == null) {
+      return SizedBox.shrink();
+    }
+
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: Colors.green[600], // Always green since we'll show all active chats
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 6,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: () async {
+            await _navigateToActiveDeliveryChat();
+          },
+          child: Stack(
+            children: [
+              Center(
+                child: Icon(
+                  Icons.chat_bubble,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              // Unread indicator dot
+              StreamBuilder<bool>(
+                stream: _getUnreadMessagesStream(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasData && snapshot.data == true) {
+                    return Positioned(
+                      right: 10,
+                      top: 10,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    );
+                  }
+                  return SizedBox.shrink();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
 }
