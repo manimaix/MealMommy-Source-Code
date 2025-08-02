@@ -150,10 +150,18 @@ class _RegisterPageState extends State<RegisterPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // App Logo or Title
-                  Icon(
-                    Icons.restaurant_menu,
-                    size: 80,
-                    color: Theme.of(context).primaryColor,
+                  Image.asset(
+                    'assets/icons/Logo.png',
+                    width: 100,
+                    height: 100,
+                    errorBuilder: (context, error, stackTrace) {
+                      // Fallback to material icon if asset fails to load
+                      return Icon(
+                        Icons.restaurant_menu,
+                        color: Theme.of(context).primaryColor,
+                        size: 28,
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   Text(
