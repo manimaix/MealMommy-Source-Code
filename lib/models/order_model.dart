@@ -47,15 +47,23 @@ class Order {
       createdAt: data['created_at'] ?? Timestamp.now(),
       updatedAt: data['updated_at'] ?? Timestamp.now(),
       deliveryAddress: data['delivery_address'] ?? '',
-      deliveryFee: data['delivery_fee'] ?? '0.00',
-      deliveryLatitude: data['delivery_latitude'] ?? '',
-      deliveryLongitude: data['delivery_longitude'] ?? '',
+      deliveryFee: _convertToString(data['delivery_fee']) ?? '0.00',
+      deliveryLatitude: _convertToString(data['delivery_latitude']) ?? '',
+      deliveryLongitude: _convertToString(data['delivery_longitude']) ?? '',
       deliveryTime: data['delivery_time'],
       pickupTime: data['pickup_time'],
       status: data['status'] ?? 'pending',
       customerName: data['customer_name'],
       customerPhone: data['customer_phone'],
     );
+  }
+
+  // Helper method to convert various types to String
+  static String? _convertToString(dynamic value) {
+    if (value == null) return null;
+    if (value is String) return value;
+    if (value is num) return value.toString();
+    return value.toString();
   }
 
   Map<String, dynamic> toMap() {
