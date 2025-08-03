@@ -183,6 +183,28 @@ class _UserProfilePageState extends State<UserProfilePage> {
     });
   }
 
+  void _handleBackNavigation(BuildContext context) {
+    // Check if we can pop (meaning there's a previous route)
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      // If we can't pop, navigate to the appropriate home page based on role
+      switch (_role.toLowerCase()) {
+        case 'vendor':
+          Navigator.of(context).pushReplacementNamed('/vendor');
+          break;
+        case 'driver':
+        case 'runner':
+          Navigator.of(context).pushReplacementNamed('/driver');
+          break;
+        case 'customer':
+        default:
+          Navigator.of(context).pushReplacementNamed('/customer');
+          break;
+      }
+    }
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -198,7 +220,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
         title: Text(widget.editable ? 'Edit Profile' : 'View Profile'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => _handleBackNavigation(context),
         ),
       ),
       body: _loading
@@ -253,14 +275,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     controller: _addressController,
                     readOnly: !widget.editable,
                   ),
-
-                  // QR Code section for drivers and vendors
-                  if ((_role.toLowerCase() == 'driver' || _role.toLowerCase() == 'runner' || _role.toLowerCase() == 'vendor') && widget.editable) ...[
-                    const SizedBox(height: 24),
-                    const Divider(),
-                    const SizedBox(height: 16),
-                    _buildQrCodeSection(),
-                  ],
 
                   // QR Code section for drivers and vendors
                   if ((_role.toLowerCase() == 'driver' || _role.toLowerCase() == 'runner' || _role.toLowerCase() == 'vendor') && widget.editable) ...[

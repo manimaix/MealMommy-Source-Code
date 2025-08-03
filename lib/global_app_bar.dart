@@ -127,7 +127,7 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
                         Navigator.of(context).pushReplacementNamed('/cert');
                         break;
                       case 'profile':
-                        Navigator.of(context).pushReplacementNamed('/profile');
+                        Navigator.of(context).pushNamed('/profile');
                         break;
                       case 'logout':
                         _signOut(context);
