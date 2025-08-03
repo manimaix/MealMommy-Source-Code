@@ -78,13 +78,22 @@ class _OrderPageState extends State<OrderPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Center(
-                  child: Text(
-                    "Order List",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Order List",
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pushNamed('/orderpaymentpending');
+                      },
+                      child: const Text("View Pending Payments"),
+                    ),
+                  ],
                 ),
               ),
               Expanded(

@@ -119,93 +119,137 @@ class _NotificationPageState extends State<NotificationPage> {
         currentUser: currentUser,
         title: 'Notifications',
       ),
-      body: notifications.isEmpty
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.notifications_none,
-                    size: 80,
-                    color: Colors.grey,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () {
+                    // Navigate back based on user role
+                    switch (currentUser?.role.toLowerCase()) {
+                      case 'vendor':
+                        Navigator.of(context).pushReplacementNamed('/vendor');
+                        break;
+                      case 'customer':
+                        Navigator.of(context).pushReplacementNamed('/customer');
+                        break;
+                      case 'driver':
+                        Navigator.of(context).pushReplacementNamed('/driver');
+                        break;
+                      default:
+                        Navigator.of(context).pushReplacementNamed('/login');
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Notifications',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
                   ),
-                  SizedBox(height: 16),
-                  Text(
-                    'No notifications yet',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: notifications.length,
-              itemBuilder: (context, index) {
-                final notification = notifications[index];
-                final isRead = notification['read'] as bool;
-                
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  elevation: isRead ? 1 : 3,
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.all(16),
-                    leading: CircleAvatar(
-                      backgroundColor: _getNotificationColor(notification['type']),
-                      child: Icon(
-                        _getNotificationIcon(notification['type']),
-                        color: Colors.white,
-                      ),
-                    ),
-                    title: Text(
-                      notification['title'],
-                      style: TextStyle(
-                        fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
-                        color: isRead ? Colors.grey[600] : Colors.black,
-                      ),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // Notification List or Empty State
+          Expanded(
+            child: notifications.isEmpty
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const SizedBox(height: 4),
-                        Text(
-                          notification['body'],
-                          style: TextStyle(
-                            color: isRead ? Colors.grey[500] : Colors.grey[700],
-                          ),
+                        Icon(
+                          Icons.notifications_none,
+                          size: 80,
+                          color: Colors.grey,
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: 16),
                         Text(
-                          _formatTimestamp(notification['timestamp']),
+                          'No notifications yet',
                           style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[400],
+                            fontSize: 18,
+                            color: Colors.grey,
                           ),
                         ),
                       ],
                     ),
-                    trailing: !isRead
-                        ? Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Colors.blue,
-                              shape: BoxShape.circle,
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: notifications.length,
+                    itemBuilder: (context, index) {
+                      final notification = notifications[index];
+                      final isRead = notification['read'] as bool;
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: isRead ? 1 : 3,
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.all(16),
+                          leading: CircleAvatar(
+                            backgroundColor: _getNotificationColor(notification['type']),
+                            child: Icon(
+                              _getNotificationIcon(notification['type']),
+                              color: Colors.white,
                             ),
-                          )
-                        : null,
-                    onTap: () {
-                      if (!isRead) {
-                        _markAsRead(notification['id']);
-                      }
-                      // Handle notification tap - navigate to relevant page
+                          ),
+                          title: Text(
+                            notification['title'],
+                            style: TextStyle(
+                              fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
+                              color: isRead ? Colors.grey[600] : Colors.black,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text(
+                                notification['body'],
+                                style: TextStyle(
+                                  color: isRead ? Colors.grey[500] : Colors.grey[700],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _formatTimestamp(notification['timestamp']),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[400],
+                                ),
+                              ),
+                            ],
+                          ),
+                          trailing: !isRead
+                              ? Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.blue,
+                                    shape: BoxShape.circle,
+                                  ),
+                                )
+                              : null,
+                          onTap: () {
+                            if (!isRead) {
+                              _markAsRead(notification['id']);
+                            }
+                            // Handle notification tap
+                          },
+                        ),
+                      );
                     },
                   ),
-                );
-              },
-            ),
+          ),
+        ],
+      ),
     );
   }
 }

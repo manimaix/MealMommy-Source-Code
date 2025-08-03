@@ -25,6 +25,7 @@ import 'vendor/foodsafety.dart';
 import 'models/meal_model.dart';
 import 'vendor/certificate.dart';
 import 'customer/user_profile.dart';
+import 'vendor/order_payment_pending.dart';
 
 
 void main() async {
@@ -90,6 +91,7 @@ class MyApp extends StatelessWidget {
         '/foodsafety': (context) => const FoodSafetyPage(),
         '/cert': (context) => const CertificatePage(),
         '/profile': (context) => const UserProfilePage(),
+        '/orderpaymentpending': (context) => const OrderPaymentPendingPage(),
         '/editfood': (context) => EditFoodPage(
           meal: ModalRoute.of(context)!.settings.arguments as Meal,
         ),

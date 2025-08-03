@@ -31,6 +31,19 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final customerUid = orderData['uid'];
     final vendorVid = orderData['vendor_id'];
 
+    final groupId = orderData['group_id']; 
+    if (groupId == null) {
+      throw Exception('Group ID missing from order');
+    }
+
+    final groupOrderDoc = await firestore.collection('grouporders').doc(groupId).get();
+    final groupOrderData = groupOrderDoc.data();
+    if (groupOrderData == null) {
+      throw Exception('Group order not found');
+    }
+
+    final runnerRid = groupOrderData['driver_id'];
+
     // mealid/ quantity/ status
     for (final item in orderItems) {
       final mealRef = firestore.collection('meals').doc(item['meal_id']);
@@ -45,7 +58,6 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       final updatedStatus = updatedQty <= 0 ? false : mealData['status'];
 
       await mealRef.update({
-        'quantity_available': updatedQty,
         'status': updatedStatus,
         });
       }
@@ -83,6 +95,26 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     // store notification (order complete)
     await FirebaseFirestore.instance.collection('notifications').add({
       'title': 'Order Complete',
+      'body': 'Your food is ready!',
+      'sender_id': vendorVid,
+      'receiver_id': customerUid,
+      'sent_at': Timestamp.now(),
+      'seen': false,
+    });
+
+    // store notification (order complete)
+    await FirebaseFirestore.instance.collection('grouporders').add({
+      'title': 'Food Ready',
+      'body': 'The food is ready to delivery!',
+      'sender_id': vendorVid,
+      'receiver_id': runnerRid,
+      'sent_at': Timestamp.now(),
+      'seen': false,
+    });
+
+    // store notification (order complete)
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'title': 'Order',
       'body': 'Your food is ready!',
       'sender_id': vendorVid,
       'receiver_id': customerUid,
@@ -130,7 +162,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
           final order = snapshot.data!.data() as Map<String, dynamic>;
-          final orderTime = (order['order_time'] as Timestamp).toDate();
+          final orderTime = (order['created_at'] as Timestamp).toDate();
           final status = order['status'];
 
           return FutureBuilder<QuerySnapshot>(
