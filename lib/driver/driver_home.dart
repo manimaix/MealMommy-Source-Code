@@ -203,7 +203,7 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
     
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('delivery_preferences')
+          .collection('deliverypreference')
           .doc(currentUser!.uid)
           .get();
       
@@ -218,7 +218,7 @@ class _DriverHomeState extends State<DriverHome> with TickerProviderStateMixin {
         );
         
         await FirebaseFirestore.instance
-            .collection('delivery_preferences')
+            .collection('deliverypreference')
             .doc(currentUser!.uid)
             .set(defaultPrefs.toMap());
         

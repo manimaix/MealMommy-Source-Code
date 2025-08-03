@@ -287,22 +287,17 @@ class _ChatPageState extends State<ChatPage> {
     
     if (isSystemMessage) {
       return Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
+        margin: const EdgeInsets.symmetric(vertical: 8),
         child: Center(
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.symmetric(horizontal: 20),
             decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(16),
+              color: Colors.blue[50],
+              border: Border.all(color: Colors.blue[200]!),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Text(
-              messageData['text'] ?? '',
-              style: TextStyle(
-                color: Colors.grey[700],
-                fontSize: 12,
-              ),
-              textAlign: TextAlign.center,
-            ),
+            child: _buildSystemMessageContent(messageData['text'] ?? ''),
           ),
         ),
       );
@@ -384,6 +379,133 @@ class _ChatPageState extends State<ChatPage> {
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildSystemMessageContent(String text) {
+    // Split the text by lines to process each line
+    final lines = text.split('\n');
+    final widgets = <Widget>[];
+    
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i].trim();
+      
+      // Check if this line contains a QR code URL
+      if (line.contains('QR') && (line.contains('https://') || line.contains('http://'))) {
+        // Extract the URL from the line
+        final urlMatch = RegExp(r'https?://[^\s]+').firstMatch(line);
+        if (urlMatch != null) {
+          final qrUrl = urlMatch.group(0)!;
+          final labelText = line.substring(0, urlMatch.start).trim();
+          
+          // Add the label text if it exists
+          if (labelText.isNotEmpty) {
+            widgets.add(
+              Text(
+                labelText,
+                style: TextStyle(
+                  color: Colors.blue[800],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            );
+            widgets.add(const SizedBox(height: 8));
+          }
+          
+          // Add the QR code image
+          widgets.add(
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  qrUrl,
+                  width: 120,
+                  height: 120,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      width: 120,
+                      height: 120,
+                      color: Colors.grey[200],
+                      child: Icon(
+                        Icons.qr_code,
+                        size: 40,
+                        color: Colors.grey[400],
+                      ),
+                    );
+                  },
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      width: 120,
+                      height: 120,
+                      color: Colors.grey[100],
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                  loadingProgress.expectedTotalBytes!
+                              : null,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+          
+          // Add some spacing after QR code
+          if (i < lines.length - 1) {
+            widgets.add(const SizedBox(height: 12));
+          }
+        } else {
+          // Line mentions QR but no URL found, display as text
+          widgets.add(
+            Text(
+              line,
+              style: TextStyle(
+                color: Colors.blue[700],
+                fontSize: 13,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          );
+          if (i < lines.length - 1) {
+            widgets.add(const SizedBox(height: 4));
+          }
+        }
+      } else if (line.isNotEmpty) {
+        // Regular text line
+        widgets.add(
+          Text(
+            line,
+            style: TextStyle(
+              color: Colors.blue[700],
+              fontSize: 13,
+              fontWeight: line.startsWith('🚛') || line.startsWith('✅') 
+                  ? FontWeight.w600 
+                  : FontWeight.normal,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        );
+        if (i < lines.length - 1) {
+          widgets.add(const SizedBox(height: 4));
+        }
+      }
+    }
+    
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: widgets,
     );
   }
 

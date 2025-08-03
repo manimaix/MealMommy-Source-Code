@@ -41,9 +41,9 @@ class ChatService {
       await _firestore.collection('chatroom').doc(chatRoomId).set(chatRoomData);
       print('✅ Chat room created with ID: $chatRoomId');
       
-      // Send initial system message
-      await _sendSystemMessage(chatRoomId, 'Delivery chat started for order $groupOrderId. Driver, vendor, and customers can communicate here.');
-      print('✅ Initial system message sent');
+      // Send initial system message with QR codes
+      await _sendInitialSystemMessageWithQrCodes(chatRoomId, groupOrderId, driverId, vendorId);
+      print('✅ Initial system message with QR codes sent');
       
       return chatRoomId;
     } catch (e) {
@@ -63,6 +63,8 @@ class ChatService {
           .get();
       
       for (var doc in chatRooms.docs) {
+        final chatRoomData = doc.data();
+        
         await doc.reference.update({
           'status': 'completed',
           'completedAt': Timestamp.now(),
@@ -70,8 +72,8 @@ class ChatService {
           'lastMessageTime': Timestamp.now(),
         });
         
-        // Send system message about completion
-        await _sendSystemMessage(doc.id, 'Order has been completed! This chat will be automatically disabled after 24 hours.');
+        // Send system message about completion with QR codes for final reference
+        await _sendCompletionSystemMessageWithQrCodes(doc.id, groupOrderId, chatRoomData);
       }
       
     } catch (e) {
@@ -121,6 +123,170 @@ class ChatService {
       });
     } catch (e) {
       print('Error sending system message: $e');
+    }
+  }
+
+  /// Sends initial system message with driver and vendor QR codes
+  static Future<void> _sendInitialSystemMessageWithQrCodes(
+    String chatRoomId, 
+    String groupOrderId, 
+    String driverId, 
+    String vendorId
+  ) async {
+    try {
+      // Get driver QR code
+      String driverInfo = '🚚 Driver ID: $driverId';
+      try {
+        final driverDoc = await _firestore.collection('users').doc(driverId).get();
+        if (driverDoc.exists) {
+          final driverData = driverDoc.data()!;
+          final driverName = driverData['name'] ?? 'Unknown Driver';
+          final driverQrCode = driverData['qr_code'];
+          
+          driverInfo = '🚚 Driver: $driverName';
+          if (driverQrCode != null && driverQrCode.isNotEmpty) {
+            driverInfo += '\n📱 Driver QR Code: $driverQrCode';
+          }
+        }
+      } catch (e) {
+        print('Error fetching driver info: $e');
+      }
+
+      // Get vendor QR code
+      String vendorInfo = '🏪 Vendor ID: $vendorId';
+      if (vendorId.isNotEmpty) {
+        try {
+          final vendorDoc = await _firestore.collection('users').doc(vendorId).get();
+          if (vendorDoc.exists) {
+            final vendorData = vendorDoc.data()!;
+            final vendorName = vendorData['name'] ?? 'Unknown Vendor';
+            final vendorQrCode = vendorData['qr_code'];
+            
+            vendorInfo = '🏪 Vendor: $vendorName';
+            if (vendorQrCode != null && vendorQrCode.isNotEmpty) {
+              vendorInfo += '\n💳 Vendor Payment QR: $vendorQrCode';
+            }
+          }
+        } catch (e) {
+          print('Error fetching vendor info: $e');
+        }
+      }
+
+      // Compose the full system message
+      final systemMessage = '''🚛 Delivery Chat Started for Order #$groupOrderId
+
+$driverInfo
+
+$vendorInfo
+
+💬 All participants can communicate here for delivery coordination.
+📞 Use QR codes for verification and payments.''';
+
+      // Send the enhanced system message
+      await _firestore.collection('chatmessages').add({
+        'chatRoomId': chatRoomId,
+        'senderId': 'system',
+        'senderName': 'System',
+        'text': systemMessage,
+        'type': 'system',
+        'sentAt': Timestamp.now(),
+      });
+
+    } catch (e) {
+      print('Error sending initial system message with QR codes: $e');
+      // Fallback to basic message
+      await _sendSystemMessage(chatRoomId, 'Delivery chat started for order $groupOrderId. Driver, vendor, and customers can communicate here.');
+    }
+  }
+
+  /// Sends completion system message with QR codes for final reference
+  static Future<void> _sendCompletionSystemMessageWithQrCodes(
+    String chatRoomId, 
+    String groupOrderId, 
+    Map<String, dynamic> chatRoomData
+  ) async {
+    try {
+      final participants = List<String>.from(chatRoomData['participants'] ?? []);
+      
+      // Find driver and vendor from participants
+      String? driverId;
+      String? vendorId;
+      
+      for (String participantId in participants) {
+        try {
+          final userDoc = await _firestore.collection('users').doc(participantId).get();
+          if (userDoc.exists) {
+            final userData = userDoc.data()!;
+            final role = userData['role']?.toLowerCase();
+            
+            if (role == 'driver' || role == 'runner') {
+              driverId = participantId;
+            } else if (role == 'vendor') {
+              vendorId = participantId;
+            }
+          }
+        } catch (e) {
+          print('Error checking participant role: $e');
+        }
+      }
+
+      // Build completion message with QR codes
+      String completionMessage = '✅ Order #$groupOrderId has been completed!\n\n';
+      
+      // Add driver QR if available
+      if (driverId != null) {
+        try {
+          final driverDoc = await _firestore.collection('users').doc(driverId).get();
+          if (driverDoc.exists) {
+            final driverData = driverDoc.data()!;
+            final driverName = driverData['name'] ?? 'Unknown Driver';
+            final driverQrCode = driverData['qr_code'];
+            
+            completionMessage += '🚚 Driver: $driverName\n';
+            if (driverQrCode != null && driverQrCode.isNotEmpty) {
+              completionMessage += '📱 Driver QR: $driverQrCode\n';
+            }
+          }
+        } catch (e) {
+          print('Error fetching driver completion info: $e');
+        }
+      }
+
+      // Add vendor QR if available
+      if (vendorId != null) {
+        try {
+          final vendorDoc = await _firestore.collection('users').doc(vendorId).get();
+          if (vendorDoc.exists) {
+            final vendorData = vendorDoc.data()!;
+            final vendorName = vendorData['name'] ?? 'Unknown Vendor';
+            final vendorQrCode = vendorData['qr_code'];
+            
+            completionMessage += '\n🏪 Vendor: $vendorName\n';
+            if (vendorQrCode != null && vendorQrCode.isNotEmpty) {
+              completionMessage += '💳 Payment QR: $vendorQrCode\n';
+            }
+          }
+        } catch (e) {
+          print('Error fetching vendor completion info: $e');
+        }
+      }
+
+      completionMessage += '\n💬 This chat will be automatically disabled after 24 hours.\n🙏 Thank you for using MealMommy!';
+
+      // Send the completion message
+      await _firestore.collection('chatmessages').add({
+        'chatRoomId': chatRoomId,
+        'senderId': 'system',
+        'senderName': 'System',
+        'text': completionMessage,
+        'type': 'system',
+        'sentAt': Timestamp.now(),
+      });
+
+    } catch (e) {
+      print('Error sending completion message with QR codes: $e');
+      // Fallback to basic completion message
+      await _sendSystemMessage(chatRoomId, 'Order has been completed! This chat will be automatically disabled after 24 hours.');
     }
   }
 
