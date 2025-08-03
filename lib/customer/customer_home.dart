@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../models/user_model.dart';
-import 'user_profile.dart'; 
+import 'user_profile.dart';
 import 'customer_orders.dart';
 import 'customer_ordermeal.dart';
+import '../chat_room_list_page.dart'; 
+import '../services/chat_service.dart';
 class CustomerHome extends StatefulWidget {
   const CustomerHome({super.key});
 
@@ -31,6 +33,30 @@ class _CustomerHomeState extends State<CustomerHome> {
     } catch (e) {
       setState(() => _isLoading = false);
       debugPrint('Error loading user: $e');
+    }
+  }
+
+  //  chat rooms
+  Future<void> _openChatRoomList() async {
+    if (_currentUser == null) return;
+
+    try {
+      final chatRooms = await ChatService.getUserChatRooms(_currentUser!.uid);
+      if (!mounted) return;
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatRoomListPage(
+            currentUserId: _currentUser!.uid,
+            chatRooms: chatRooms,
+          ),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load chats: $e')),
+      );
     }
   }
 
@@ -78,74 +104,61 @@ class _CustomerHomeState extends State<CustomerHome> {
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 30,
-                          backgroundImage: _currentUser?.profileImage != null
-                              ? NetworkImage(_currentUser!.profileImage!)
-                              : null,
-                          child: _currentUser?.profileImage == null
-                              ? const Icon(Icons.person, size: 30)
-                              : null,
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Welcome, ${_currentUser?.name ?? 'User'}!',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.bold),
-                              ),
-                              Text(
-                                _currentUser?.email ?? '',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                        color: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.color),
-                              ),
-                              Container(
-                                margin: const EdgeInsets.only(top: 4),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Text(
-                                  'CUSTOMER',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                    CircleAvatar(
+                      radius: 30,
+                      backgroundImage: _currentUser?.profileImage != null
+                          ? NetworkImage(_currentUser!.profileImage!)
+                          : null,
+                      child: _currentUser?.profileImage == null
+                          ? const Icon(Icons.person, size: 30)
+                          : null,
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Ready to order your favorite meal?',
-                      style: Theme.of(context).textTheme.bodyLarge,
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Welcome, ${_currentUser?.name ?? 'User'}!',
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            _currentUser?.email ?? '',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: Colors.grey),
+                          ),
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              'CUSTOMER',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
+
             const SizedBox(height: 24),
 
             // Quick Actions
@@ -157,6 +170,7 @@ class _CustomerHomeState extends State<CustomerHome> {
                   ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
+
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
@@ -194,15 +208,10 @@ class _CustomerHomeState extends State<CustomerHome> {
                 ),
                 _buildActionCard(
                   context,
-                  'Favorites',
-                  Icons.favorite,
-                  Colors.red,
-                  () {
-                    // TODO: Navigate to favorites
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Favorites coming soon!')),
-                    );
-                  },
+                  'Messages',
+                  Icons.chat,
+                  Colors.blue,
+                  _openChatRoomList, //
                 ),
                 _buildActionCard(
                   context,
@@ -220,9 +229,10 @@ class _CustomerHomeState extends State<CustomerHome> {
                 ),
               ],
             ),
+
             const SizedBox(height: 24),
 
-            // Recent Activity (Placeholder)
+            // Recent Activity
             Text(
               'Recent Activity',
               style: Theme.of(context)

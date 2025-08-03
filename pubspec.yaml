@@ -52,6 +52,7 @@ dependencies:
   geolocator: ^13.0.2
   firebase_app_check: ^0.3.2+10
   cached_network_image: ^3.4.1
+  geocoding: ^4.0.0
 
 
 dev_dependencies:

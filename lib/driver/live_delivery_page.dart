@@ -31,6 +31,12 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
   List<LatLng> currentRoutePoints = []; // Route from current point to next point only
   bool isLoading = false;
   int currentNavigationStep = 0; // 0: driver->vendor, 1: vendor->customer1, 2: customer1->customer2, etc.
+  
+  // Order items data for pickup/delivery display
+  Map<String, List<Map<String, dynamic>>> orderItems = {}; // order_id -> list of items with meal details
+  bool isLoadingOrderItems = false;
+  int orderItemsRetryCount = 0;
+  static const int maxRetryAttempts = 5;
 
   @override
   void initState() {
@@ -67,6 +73,9 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
       
       // Refresh delivery data from Firebase to get latest status
       _refreshDeliveryDataFromFirebase();
+      
+      // Fetch order items with meal details
+      _fetchOrderItems();
       
       // Generate route if waypoints are available
       if (optimizedWaypoints.isNotEmpty) {
@@ -135,6 +144,8 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
         groupOrder!.status != 'assigned' &&
         groupOrder!.status != 'open') {
       currentStatus = groupOrder!.status;
+      // Update driver location based on restored status
+      _updateDriverLocationBasedOnStatus();
       return;
     }
     
@@ -174,6 +185,174 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
       }
     } else {
       currentStatus = 'Heading to Vendor';
+    }
+    
+    // Update driver location based on determined status
+    _updateDriverLocationBasedOnStatus();
+  }
+
+  // Update driver location based on current delivery progress
+  void _updateDriverLocationBasedOnStatus() {
+    if (groupOrder == null) return;
+    
+    setState(() {
+      if (currentStatus == 'Heading to Vendor') {
+        // Driver location stays as current (from args or GPS)
+        // No change needed - keep original driver location
+      } else if (currentStatus == 'At Vendor - Picking Up' || 
+                 currentStatus.startsWith('Heading to Customer')) {
+        // Driver is at vendor location after pickup
+        if (vendorLocation != null) {
+          driverLocation = vendorLocation;
+          print('🚗 Driver location updated to vendor: ${vendorLocation!.latitude}, ${vendorLocation!.longitude}');
+        }
+      } else if (currentStatus.startsWith('At Customer') && currentStatus.contains('Delivering')) {
+        // Driver is at current customer location
+        if (currentDeliveryIndex < deliveries.length) {
+          final currentDelivery = deliveries[currentDeliveryIndex];
+          final lat = currentDelivery.latitude;
+          final lng = currentDelivery.longitude;
+          
+          if (lat != null && lng != null) {
+            driverLocation = LatLng(lat, lng);
+            print('🚗 Driver location updated to customer ${currentDeliveryIndex + 1}: $lat, $lng');
+          }
+        }
+      } else if (currentStatus == 'All Deliveries Complete') {
+        // Driver is at last delivery location
+        if (deliveries.isNotEmpty) {
+          final lastDelivery = deliveries.last;
+          final lat = lastDelivery.latitude;
+          final lng = lastDelivery.longitude;
+          
+          if (lat != null && lng != null) {
+            driverLocation = LatLng(lat, lng);
+            print('🚗 Driver location updated to final delivery location: $lat, $lng');
+          }
+        }
+      }
+    });
+  }
+
+  // Fetch order items with meal details for pickup/delivery display
+  Future<void> _fetchOrderItems() async {
+    if (deliveries.isEmpty) return;
+    
+    setState(() {
+      isLoadingOrderItems = true;
+      orderItemsRetryCount = 0;
+    });
+    
+    await _fetchOrderItemsWithRetry();
+  }
+
+  Future<void> _fetchOrderItemsWithRetry() async {
+    try {
+      final Map<String, List<Map<String, dynamic>>> fetchedOrderItems = {};
+      
+      for (final order in deliveries) {
+        // Fetch order items for this order
+        final orderItemsSnapshot = await FirebaseFirestore.instance
+            .collection('order_items')
+            .where('order_id', isEqualTo: order.id)
+            .get();
+        
+        List<Map<String, dynamic>> itemsWithMealDetails = [];
+        
+        for (final itemDoc in orderItemsSnapshot.docs) {
+          final itemData = itemDoc.data();
+          final mealId = itemData['meal_id'] as String;
+          
+          // Fetch meal details
+          final mealDoc = await FirebaseFirestore.instance
+              .collection('meals')
+              .doc(mealId)
+              .get();
+          
+          if (mealDoc.exists) {
+            final mealData = mealDoc.data()!;
+            itemsWithMealDetails.add({
+              'meal_id': mealId,
+              'order_id': itemData['order_id'],
+              'quantity': itemData['quantity'],
+              'subtotal': itemData['subtotal'],
+              'meal_name': mealData['name'] ?? 'Unknown Meal',
+              'meal_price': mealData['price'] ?? 0,
+              'meal_description': mealData['description'] ?? '',
+            });
+          }
+        }
+        
+        fetchedOrderItems[order.id] = itemsWithMealDetails;
+      }
+      
+      setState(() {
+        orderItems = fetchedOrderItems;
+        isLoadingOrderItems = false;
+      });
+      
+      // Success - show confirmation if retries occurred
+      if (orderItemsRetryCount > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Order items loaded successfully after ${orderItemsRetryCount + 1} attempts'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      
+      print('=== DEBUG: Order Items Fetched ===');
+      print('Total orders with items: ${orderItems.length}');
+      orderItems.forEach((orderId, items) {
+        print('Order $orderId: ${items.length} items');
+        for (var item in items) {
+          print('  - ${item['meal_name']} x${item['quantity']} (RM${item['subtotal']})');
+        }
+      });
+      print('================================');
+      
+    } catch (e) {
+      print('Error fetching order items (attempt ${orderItemsRetryCount + 1}): $e');
+      
+      if (orderItemsRetryCount < maxRetryAttempts - 1) {
+        setState(() {
+          orderItemsRetryCount++;
+        });
+        
+        // Show retry attempt to user
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Loading order items failed, retrying... (${orderItemsRetryCount + 1}/$maxRetryAttempts)'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        
+        // Wait 2 seconds before retry
+        await Future.delayed(Duration(seconds: 2));
+        await _fetchOrderItemsWithRetry();
+      } else {
+        // Max retries reached - show error with manual retry option
+        setState(() {
+          isLoadingOrderItems = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load order items after $maxRetryAttempts attempts'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'RETRY',
+              textColor: Colors.white,
+              onPressed: () {
+                _fetchOrderItems();
+              },
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -351,7 +530,13 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
       
       if (currentStatus == 'Heading to Vendor') {
         newStatus = 'At Vendor - Picking Up';
-        // No navigation step change yet, still at vendor
+        // Update driver location to vendor
+        if (vendorLocation != null) {
+          setState(() {
+            driverLocation = vendorLocation;
+          });
+          print('🚗 Driver location updated to vendor for pickup: ${vendorLocation!.latitude}, ${vendorLocation!.longitude}');
+        }
       } else if (currentStatus == 'At Vendor - Picking Up') {
         newStatus = 'Heading to Customer ${currentDeliveryIndex + 1}';
         // Update all orders in this group to "delivering" status
@@ -359,11 +544,24 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
         // Move to next navigation step (vendor to first customer)
         setState(() {
           currentNavigationStep = 1;
+          // Driver location stays at vendor until moving to customer
         });
         await _generateCurrentStepRoute();
       } else if (currentStatus.startsWith('Heading to Customer')) {
         newStatus = 'At Customer ${currentDeliveryIndex + 1} - Delivering';
-        // No navigation step change yet, still at current customer
+        // Update driver location to current customer
+        if (currentDeliveryIndex < deliveries.length) {
+          final currentDelivery = deliveries[currentDeliveryIndex];
+          final lat = currentDelivery.latitude;
+          final lng = currentDelivery.longitude;
+          
+          if (lat != null && lng != null) {
+            setState(() {
+              driverLocation = LatLng(lat, lng);
+            });
+            print('🚗 Driver location updated to customer ${currentDeliveryIndex + 1}: $lat, $lng');
+          }
+        }
       } else if (currentStatus.startsWith('At Customer') && currentStatus.contains('Delivering')) {
         // Mark current customer's order as delivered
         await _markCurrentOrderAsDelivered();
@@ -380,6 +578,17 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
           newStatus = 'All Deliveries Complete';
           setState(() {
             currentRoutePoints = []; // Clear route
+            // Update driver location to final delivery location
+            if (deliveries.isNotEmpty) {
+              final lastDelivery = deliveries.last;
+              final lat = lastDelivery.latitude;
+              final lng = lastDelivery.longitude;
+              
+              if (lat != null && lng != null) {
+                driverLocation = LatLng(lat, lng);
+                print('🚗 Driver location updated to final delivery location: $lat, $lng');
+              }
+            }
           });
           await _completeAllDeliveries();
           return;
@@ -1205,6 +1414,119 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
                         ],
                       ),
                       
+                      // Order Items Display
+                      if (orderItems.containsKey(delivery.id) && orderItems[delivery.id]!.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isCurrentDelivery ? Colors.blue[25] : Colors.grey[100],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    isCurrentDelivery ? Icons.local_shipping : Icons.restaurant_menu,
+                                    size: 16,
+                                    color: isCurrentDelivery ? Colors.blue : Colors.grey[600],
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    isCurrentDelivery ? '🚚 DELIVER TO CUSTOMER:' : '📦 PICKUP ITEMS:',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: isCurrentDelivery ? Colors.blue[700] : Colors.grey[700],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              ...orderItems[delivery.id]!.map((item) => Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      '• ${item['meal_name']} x${item['quantity']}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[800],
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      'RM ${item['subtotal']}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.green[700],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )).toList(),
+                              const SizedBox(height: 4),
+                              Divider(height: 1, color: Colors.grey[300]),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Text(
+                                    'Delivery Fee:',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey[800],
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    'RM ${delivery.deliveryFee}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (isLoadingOrderItems) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.grey[600]!),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Loading order items...',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      
                       // Action buttons for current delivery
                       if (isCurrentDelivery) ...[
                         const SizedBox(height: 12),
@@ -1306,71 +1628,205 @@ class _LiveDeliveryPageState extends State<LiveDeliveryPage> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.blue[200]!),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.store, color: Colors.blue, size: 24),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  vendorInfo!['name'] ?? 'Vendor',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  vendorInfo!['address'] ?? 'Vendor Address',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 2,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
           Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              ElevatedButton.icon(
-                onPressed: () => _callVendor(),
-                icon: const Icon(Icons.phone, size: 16),
-                label: const Text(
-                  'Call',
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              const Icon(Icons.store, color: Colors.blue, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      vendorInfo!['name'] ?? 'Vendor',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      vendorInfo!['address'] ?? 'Vendor Address',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
-              ElevatedButton.icon(
-                onPressed: _openChatRoom,
-                icon: const Icon(Icons.chat, size: 16),
-                label: const Text(
-                  'Chat',
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => _callVendor(),
+                    icon: const Icon(Icons.phone, size: 16),
+                    label: const Text(
+                      'Call',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: _openChatRoom,
+                    icon: const Icon(Icons.chat, size: 16),
+                    label: const Text(
+                      'Chat',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
+          
+          // Vendor Pickup Summary
+          if (_shouldShowPickupSummary()) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.shopping_basket, size: 18, color: Colors.green[700]),
+                      const SizedBox(width: 6),
+                      Text(
+                        '📦 TOTAL PICKUP ITEMS:',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ..._getVendorPickupSummary().map((item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        Text(
+                          '• ${item['meal_name']} x${item['total_quantity']}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[800],
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'RM ${item['total_subtotal'].toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.green[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  )).toList(),
+                  const SizedBox(height: 6),
+                  Divider(height: 1, color: Colors.green[300]),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Text(
+                        'Total Orders: ${deliveries.length}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        'Total Value: RM ${_getTotalPickupValue().toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  // Check if pickup summary should be shown (at vendor stage)
+  bool _shouldShowPickupSummary() {
+    return currentStatus == 'Heading to Vendor' || 
+           currentStatus == 'At Vendor - Picking Up';
+  }
+
+  // Get aggregated pickup summary for vendor
+  List<Map<String, dynamic>> _getVendorPickupSummary() {
+    Map<String, Map<String, dynamic>> mealSummary = {};
+    
+    // Aggregate all order items by meal
+    for (final orderItemsList in orderItems.values) {
+      for (final item in orderItemsList) {
+        final mealId = item['meal_id'] as String;
+        final mealName = item['meal_name'] as String;
+        final quantity = item['quantity'] as int;
+        final subtotal = (item['subtotal'] as num).toDouble();
+        
+        if (mealSummary.containsKey(mealId)) {
+          mealSummary[mealId]!['total_quantity'] += quantity;
+          mealSummary[mealId]!['total_subtotal'] += subtotal;
+        } else {
+          mealSummary[mealId] = {
+            'meal_name': mealName,
+            'total_quantity': quantity,
+            'total_subtotal': subtotal,
+          };
+        }
+      }
+    }
+    
+    // Convert to list and sort by meal name
+    return mealSummary.values.toList()
+      ..sort((a, b) => a['meal_name'].compareTo(b['meal_name']));
+  }
+
+  // Get total value of all pickup items
+  double _getTotalPickupValue() {
+    double total = 0.0;
+    for (final orderItemsList in orderItems.values) {
+      for (final item in orderItemsList) {
+        total += (item['subtotal'] as num).toDouble();
+      }
+    }
+    return total;
   }
 
   void _callCustomer(String? phoneNumber) {

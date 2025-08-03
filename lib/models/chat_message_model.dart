@@ -6,7 +6,6 @@ class ChatMessage {
   final String senderId;
   final String senderName;
   final String? text;
-  final String? mediaUrl;
   final String type;
   final Timestamp sentAt;
 
@@ -16,7 +15,6 @@ class ChatMessage {
     required this.senderId,
     required this.senderName,
     this.text,
-    this.mediaUrl,
     required this.type,
     required this.sentAt,
   });
@@ -28,7 +26,6 @@ class ChatMessage {
       senderId: data['senderId'] ?? '',
       senderName: data['senderName'] ?? 'Unknown User',
       text: data['text'],
-      mediaUrl: data['mediaUrl'],
       type: data['type'] ?? 'text',
       sentAt: data['sentAt'] ?? Timestamp.now(),
     );
@@ -40,7 +37,6 @@ class ChatMessage {
       'senderId': senderId,
       'senderName': senderName,
       'text': text,
-      'mediaUrl': mediaUrl,
       'type': type,
       'sentAt': sentAt,
     };
@@ -52,7 +48,6 @@ class ChatMessage {
     String? senderId,
     String? senderName,
     String? text,
-    String? mediaUrl,
     String? type,
     Timestamp? sentAt,
   }) {
@@ -62,7 +57,6 @@ class ChatMessage {
       senderId: senderId ?? this.senderId,
       senderName: senderName ?? this.senderName,
       text: text ?? this.text,
-      mediaUrl: mediaUrl ?? this.mediaUrl,
       type: type ?? this.type,
       sentAt: sentAt ?? this.sentAt,
     );
@@ -70,5 +64,4 @@ class ChatMessage {
 
   bool get isSystemMessage => senderId == 'system';
   bool get isTextMessage => type == 'text';
-  bool get isImageMessage => type == 'image';
 }

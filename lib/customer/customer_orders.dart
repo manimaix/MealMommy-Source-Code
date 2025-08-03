@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:intl/intl.dart';
 
-import 'customer_review.dart';// Updated import
+import 'customer_review.dart';
 
 class OrderHistoryPage extends StatefulWidget {
   const OrderHistoryPage({super.key});
@@ -57,10 +57,10 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
   Future<void> _loadOrders() async {
     try {
       final snapshot = await _firestore
-          .collection('orders')
-          .where('uid', isEqualTo: _uid)
-          .orderBy('order_time', descending: true)
-          .get();
+        .collection('orders')
+        .where('customer_id', isEqualTo: _uid)
+        .orderBy('created_at', descending: true)
+        .get();
 
       SchedulerBinding.instance.addPostFrameCallback((_) {
         setState(() {
@@ -106,6 +106,11 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
               final order = orderDoc.data() as Map<String, dynamic>;
               final orderId = orderDoc.id;
 
+              final Timestamp? ts = order['created_at'] as Timestamp?;
+              final String dateString = ts != null
+                ? DateFormat('dd-MM-yyyy HH:mm').format(ts.toDate())
+                : '—';
+
               return Card(
                 margin: const EdgeInsets.symmetric(vertical: 8),
                 elevation: 2,
@@ -118,11 +123,9 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text("Status: ${order['status'] ?? 'N/A'}"),
-                      Text(
-                        "Time: ${DateFormat('dd-MM-yyyy HH:mm').format((order['order_time'] as Timestamp).toDate())}",
-                      ),
+                      Text("Time: $dateString"),          
                       Text("Delivery: ${order['delivery_address'] ?? '-'}"),
-                      Text("Fee: RM${order['delivery_fee']?.toString() ?? '0'}"),
+                      Text("Delivery Fee: RM${order['delivery_fee']?.toString() ?? '0'}"),
                     ],
                   ),
                   trailing: IconButton(
@@ -132,7 +135,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>CustomerReviewPage(orderId: orderId)
+                          builder: (_) => CustomerReviewPage(orderId: orderId),
                         ),
                       );
                     },
@@ -146,3 +149,4 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
     );
   }
 }
+
