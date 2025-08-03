@@ -443,6 +443,7 @@ class _MealBrowsePageState extends State<MealBrowsePage> {
         "customer_id": user.uid,
         "vendor_id": vendorId,
         "status": "pending",
+        "delivery_fee": _deliveryFee,
         "created_at": createdAt,
         "order": orderData,
         "order_items": orderItemsList,
@@ -571,4 +572,5 @@ class _MealBrowsePageState extends State<MealBrowsePage> {
                 ),
     );
   }
+
 }
