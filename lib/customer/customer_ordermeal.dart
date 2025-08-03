@@ -359,7 +359,6 @@ class _MealBrowsePageState extends State<MealBrowsePage> {
       final vendorId = entry.key;
       final items = entry.value;
 
-      // Recalculate delivery fee for this vendor
       _vendorId = vendorId;
       await _fetchVendorLocation();
       _deliveryFee = await _calculateDeliveryFeeWithDiscount(vendorId);
@@ -370,53 +369,62 @@ class _MealBrowsePageState extends State<MealBrowsePage> {
       );
       final grandTotal = itemsTotal + _deliveryFee;
 
-      // Create group order first
       final groupOrderRef = _firestore.collection('grouporders').doc();
       final groupOrderId = groupOrderRef.id;
 
-      // Now create the order and reference group_order_id
       final orderId = _firestore.collection('orders').doc().id;
-      final orderRef = _firestore.collection('orders').doc(orderId);
+      //final orderRef = _firestore.collection('orders').doc(orderId);
 
-      await orderRef.set({
-        'order_id': orderId,
-        'group_id': groupOrderId,
-        'created_at': createdAt,
-        'customer_id': user.uid,
-        'vendor_id': vendorId,
-        'runner_id': "",
-        'delivery_fee': _deliveryFee,
-        'delivery_address': deliveryAddress,
-        'delivery_latitude': _customerPosition?.latitude ?? 0.0,
-        'delibery_longitude': _customerPosition?.longitude ?? 0.0,
-        'items_total': itemsTotal,
-        'grand_total': grandTotal,
-        'status': 'pending',
-      });
+      final orderData = {
+        "order_id": orderId,
+        "vendor_id": vendorId,
+        "delivery_address": deliveryAddress,
+        "delivery_latitude": _customerPosition?.latitude ?? 0.0,
+        "delivery_longitude": _customerPosition?.longitude ?? 0.0,
+        "delivery_time": null,
+        "pickup_time": null,
+        "group_id": groupOrderId,
+        "total_amount": grandTotal,
+        "created_at": createdAt,
+        "updated_at": createdAt,
+        "status": "pending",
+      };
 
-      // 2) Batch write: order_items + stock deduction + revenue
+      //await orderRef.set({
+        //...orderData,
+        //'customer_id': user.uid,
+       // 'runner_id': "",
+       // 'delivery_fee': _deliveryFee,
+       // 'items_total': itemsTotal,
+       // 'grand_total': grandTotal,
+     // });
+
+      // Batch: order_items + stock deduction
       final batch = _firestore.batch();
+      final List<Map<String, dynamic>> orderItemsList = [];
 
       for (var item in items) {
-        // a) order_items
-        final oiRef = _firestore.collection('order_items').doc();
-        batch.set(oiRef, {
-          'meal_id': item['id'],
-          'order_id': orderId,
-          'quantity': item['quantity'],
-          'subtotal': (item['price'] as double) * (item['quantity'] as int),
-        });
+        final quantity = item['quantity'] as int;
+        final subtotal = (item['price'] as double) * quantity;
 
-        // b) deduct stock
+        final orderItem = {
+          "order_id": orderId,
+          "meal_id": item['id'],
+          "quantity": quantity,
+          "subtotal": subtotal,
+        };
+        final oiRef = _firestore.collection('order_items').doc();
+        batch.set(oiRef, orderItem);
+        orderItemsList.add(orderItem);
+
         final mealRef = _firestore.collection('meals').doc(item['id']);
         batch.update(mealRef, {
-          'quantity_available': FieldValue.increment(-(item['quantity'] as int)),
+          'quantity_available': FieldValue.increment(-quantity),
         });
       }
 
       await batch.commit();
 
-      // 3) Save group order
       await groupOrderRef.set({
         'group_order_id': groupOrderId,
         'order_id': orderId,
@@ -427,9 +435,20 @@ class _MealBrowsePageState extends State<MealBrowsePage> {
         'completed_at': null,
         'created_at': createdAt,
       });
+
+      // Save to payment_collection in desired JSON format
+      final paymentRef = _firestore.collection('payment_collection').doc();
+      await paymentRef.set({
+        "payment_id": paymentRef.id,
+        "customer_id": user.uid,
+        "vendor_id": vendorId,
+        "status": "pending",
+        "created_at": createdAt,
+        "order": orderData,
+        "order_items": orderItemsList,
+      });
     }
 
-    // Refresh meals and clear cart
     await _fetchMeals();
     setState(() {
       _cart.clear();
@@ -445,6 +464,7 @@ class _MealBrowsePageState extends State<MealBrowsePage> {
     );
   }
 }
+
 
 
 
