@@ -1,0 +1,44 @@
+{
+  "name": "mealmommy-browserstack-tests",
+  "version": "1.0.0",
+  "description": "BrowserStack Appium automation tests for MealMommy Flutter app",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha test/**/*.js --timeout 60000",
+    "test:android": "mocha test/specs/*.js --grep 'Android' --timeout 60000",
+    "test:ios": "mocha test/specs/*.js --grep 'iOS' --timeout 60000",
+    "test:login": "mocha test/specs/login.test.js --timeout 60000",
+    "test:customer": "mocha test/specs/customer-journey.test.js --timeout 300000",
+    "test:vendor": "mocha test/specs/vendor-management.test.js --timeout 300000",
+    "test:driver": "mocha test/specs/driver-operations.test.js --timeout 300000",
+    "test:parallel": "npm run test:android & npm run test:ios",
+    "test:smoke": "mocha test/specs/smoke.test.js --timeout 60000",
+    "test:basic": "mocha test/specs/basic.test.js --timeout 60000",
+    "test:mealmommy": "mocha test/specs/mealmommy.test.js --timeout 120000",
+    "test:comprehensive": "mocha test/specs/comprehensive-mealmommy.test.js --timeout 600000",
+    "test:e2e": "mocha test/specs/integration-e2e.test.js --timeout 600000",
+    "test:all": "mocha test/specs/*.test.js --timeout 600000 --reporter spec",
+    "test:full-suite": "npm run test:basic && npm run test:customer && npm run test:vendor && npm run test:driver && npm run test:e2e"
+  },
+  "keywords": [
+    "appium",
+    "browserstack",
+    "flutter",
+    "mobile",
+    "automation",
+    "testing"
+  ],
+  "author": "MealMommy Team",
+  "license": "MIT",
+  "dependencies": {
+    "webdriverio": "^8.36.1",
+    "mocha": "^10.4.0",
+    "chai": "^5.1.0",
+    "browserstack-local": "^1.5.5",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/chai": "^4.3.14"
+  }
+}
