@@ -60,7 +60,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
         _addressController.text = data['address'] ?? '';
         _email = data['email'] ?? '';
         _role = data['role'] ?? '';
-        _profileImage = data['profile_image'];
+        _profileImage = data['profile_image'] ?? '';
         _qrCodeImage = data['qr_code'];
 
         // If driver, load delivery preferences
@@ -213,10 +213,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
                       children: [
                         CircleAvatar(
                           radius: 50,
-                          backgroundImage: _profileImage != null
+                          backgroundImage: (_profileImage != null && _profileImage!.isNotEmpty)
                               ? NetworkImage(_profileImage!)
                               : null,
-                          child: _profileImage == null
+                          child: (_profileImage == null || _profileImage!.isEmpty)
                               ? const Icon(Icons.person, size: 50)
                               : null,
                         ),
@@ -262,7 +262,15 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     _buildQrCodeSection(),
                   ],
 
-                  // Delivery preferences for drivers
+                  // QR Code section for drivers and vendors
+                  if ((_role.toLowerCase() == 'driver' || _role.toLowerCase() == 'runner' || _role.toLowerCase() == 'vendor') && widget.editable) ...[
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                    _buildQrCodeSection(),
+                  ],
+
+                  // Delivery preferences for drivers/runners
                   if ((_role.toLowerCase() == 'driver' || _role.toLowerCase() == 'runner') && widget.editable) ...[
                     const Divider(height: 32),
                     Text('Max Distance (km): ${_maxDistance.toStringAsFixed(1)}'),
